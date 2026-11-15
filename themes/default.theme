@@ -1,0 +1,13 @@
+# emsg default theme - PC Tools style: white on dark blue, cyan selection bar.
+# emsg reads this file every time it starts; edit it and start emsg again.
+#
+# Colors: black red green yellow blue magenta cyan white,
+#         optional "bright"/"light" prefix, gray, darkgray, darkblue, orange,
+#         default (terminal default), a number 0-255 or #RRGGBB.
+BACKGROUND   = darkblue
+HOTKEY       = orange
+TEXT         = white
+HIGHLIGHTBG  = cyan
+HIGHLIGHTTXT = black
+MENUBG       = lightgray
+MENUTXT      = black

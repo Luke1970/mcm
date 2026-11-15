@@ -1,0 +1,124 @@
+# Text of 'emsg --help' (and -h). Edit it, then run make: the build turns this
+# file into C strings (src/helptext.h). Lines starting with '#' are left out;
+# @VERSION@ becomes the version number. Keep lines within 80 columns.
+emsg @VERSION@ - console mail client.
+
+-Supports imap(s) pop3(s), maildir, mbox and MH mailstore formats.
+-Can be fully controled by keyboard, has limited mouse support.
+-Can handle long lists of emails and display large emails, more info under
+Limitations..
+-[WARNING] Can remember passwords encrypted. Never use this if you're not 
+convinced of the safety/ security of your home folder!
+-Minimum window size is 80x25.
+-Program was tested for Imaps on Linux, OpenBSD, Netbsd, and Windows.
+-This program was fully build with Claude AI, based on the knowledge and hard
+labour of many people. A small thank you is listed at the end of this file.
+
+The source of this program is licensed under GPLv3.
+
+Usage:
+  emsg                      the only account, or choose one from a list
+  emsg [options] [WHERE]    WHERE says where the mail is (see below)
+
+Options:
+  -a NAME     use account NAME from the config file (a new one if unknown)
+  -n          set up a new account (asks: IMAP, POP3 or local mail)
+  -f WHERE    where the mail is; the same as giving WHERE on its own
+  -s SERVER   IMAP/POP3 server host name
+  -p PORT     port (default 993 for IMAP, 995 for POP3)
+  -u USER     login name
+  -t THEME    color theme: a name (~/.config/emsg/NAME.theme) or a file
+  -V          version
+  -h, --help  this text
+
+An account with the same server and user (or path) is used, or a new one is
+made and kept in ~/.config/emsg/emsg.conf. Passwords are never taken from the
+command line; they are asked for, and can be stored encrypted.
+
+WHERE - the kinds of mail emsg reads:
+
+  IMAP over TLS - mail and folders stay on the server.
+    imaps://[USER@]HOST[:PORT][/FOLDER]            (port 993)
+      emsg imaps://jan@imap.example.com
+      emsg imaps://jan@example.com@mail.example.com:993/Archive/2025
+    The user may be an e-mail address: the last '@' ends it.
+
+  POP3 over TLS - INBOX is read from the server and left there.
+    pop3s://[USER@]HOST[:PORT]                     (port 995)
+      emsg pop3s://jan@pop.example.com
+      emsg pop3s://jan@example.com@mail.example.com:110   (110: STLS required)
+    Sent, Drafts and other folders are local, in ~/.local/share/emsg/ACCOUNT/;
+    seen/answered marks are kept there too. F5 checks for new mail.
+
+  Maildir - a directory with cur/ new/ tmp/, one file per message;
+  subfolders are .Name directories inside it (Maildir++).
+      emsg ~/Maildir
+      emsg maildir:/home/jan/Maildir
+
+  mbox - one file holding many messages, each starting with a "From " line.
+      emsg /var/spool/mail/jan
+      emsg mbox:~/mbox
+    It is only read and appended to; messages read count as seen until exit.
+
+  MH - a directory of numbered message files (1, 2, 3 ...), with the
+  unseen/replied/flagged lists in .mh_sequences; subdirectories are folders.
+      emsg ~/Mail/inbox
+
+  A directory of folders - every Maildir, mbox file and MH folder under it
+  becomes a folder (subdirectories nest); $MAIL is INBOX if none is found.
+      emsg ~/Mail
+      emsg file:///home/jan/Mail
+
+  A local path starts with '/', '~' or '.', or with file://, maildir: or mbox:.
+  In local folders and POP3 accounts, Sent and Drafts are made when first used.
+
+Keys (F1 in emsg shows them all):
+  Tab           email list / folders (up to 150 columns)   Enter  open
+  Left / Right  move between the windows
+  PgUp/PgDn     page the list       Space / Shift-, Ctrl-, Alt-Space or
+                                    Backspace: page the message (down / up)
+  M R F         Mail, Reply, Forward (vim-like editor)   H  headers   X  hex
+  T             in the editor: attach a file (an Attach: line per file)
+  A             accounts            C  config (SMTP, wrap width, passwords)
+  L             filter the email list on subject or sender (Esc: all again)
+  F5            new mail            Q  quit
+  Ctrl-Q        quit at once, from anywhere (a message being written is
+                saved in ~/.local/share/emsg/unsent-DATE.txt)
+  Ctrl-C        the same, also while emsg waits for the network;
+                a second Ctrl-C leaves immediately
+
+Files:
+  ~/.config/emsg/emsg.conf      accounts and settings (mode 0600)
+  ~/.config/emsg/NAME.theme     colors, read at every start
+  ~/.config/emsg/certs          certificates you chose to always accept
+
+Libraries and software used:
+  ncurses       the screen, keys and mouse (wide-character build, libncursesw)
+                by Zeyd M. Ben-Halim, Eric S. Raymond, Juergen Pfeifer and
+                Thomas E. Dickey; X11/MIT licence
+  OpenSSL       TLS for IMAP, POP3 and SMTP; scrypt, AES-256-GCM and random
+                numbers for stored passwords - The OpenSSL Project (from SSLeay
+                by Eric A. Young and Tim J. Hudson); Apache License 2.0
+  zlib          used by OpenSSL - Jean-loup Gailly and Mark Adler
+  C library     sockets, iconv (character sets), locale - the GNU C Library
+                (glibc) or the system's own C library
+  Build tools   a C compiler (GCC or Clang), make, awk, pkg-config
+  Claude Code   emsg was written with Claude Code, Anthropic's AI coding
+                assistant
+
+Thanks to:
+  PC Tools (Central Point Software) and Midnight Commander (Miguel de Icaza
+  and its developers) for the look; vim (Bram Moolenaar) for the editor keys;
+  xterm (Thomas E. Dickey) for the mouse and color modes.
+  Colin Percival for scrypt; Joan Daemen and Vincent Rijmen for AES (Rijndael);
+  David McGrew and John Viega for GCM.
+  D. J. Bernstein for Maildir, Sam Varshavchik for Maildir++, the RAND
+  Corporation (Bruce Borden, Stockton Gaines, Norman Shapiro) and the nmh
+  developers for MH, and Unix mail for mbox.
+  The authors of the standards emsg follows, among them:
+    IMAP     Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman (RFC 5092)
+    POP3     John Myers, Marshall Rose (RFC 1939); Chris Newman (RFC 2595)
+    SMTP     John Klensin (RFC 5321); Paul Hoffman (RFC 3207)
+    Messages Pete Resnick (RFC 5322); Ned Freed, Nathaniel Borenstein
+             (MIME, RFC 2045-2046); Keith Moore (RFC 2047); Ned Freed, Keith
+             Moore (RFC 2231); Randall Gellens (format=flowed, RFC 3676)

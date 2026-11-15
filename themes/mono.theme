@@ -1,0 +1,8 @@
+# Uses the terminal's own colors
+BACKGROUND   = default
+TEXT         = default
+HIGHLIGHTBG  = white
+HIGHLIGHTTXT = black
+MENUBG       = white
+MENUTXT      = black
+HOTKEY       = black

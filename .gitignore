@@ -1,0 +1,15 @@
+# build output
+/emsg
+src/*.o
+src/helptext.h
+win/obj/
+win/emsg/
+win/emsg.zip
+dos/obj16/
+dos/obj32/
+dos/*.EXE
+dos/*.o
+dos/*.obj
+dos/*.err
+# local notes
+gdb.txt

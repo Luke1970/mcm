@@ -1,0 +1,627 @@
+emsg - requirements
+===================
+
+A console email client in C with ncurses, styled after PC Tools and Midnight
+Commander. This file lists everything needed to build emsg again from
+scratch: what it does, how it looks, how it behaves and what it must never do.
+The README describes the same program for its users.
+
+
+1. General
+----------
+
+- Written in C (C11, POSIX), one program called `emsg`.
+- ncurses with wide characters (ncursesw) for windows, keys and mouse.
+- OpenSSL (1.1.1 or 3.x) or LibreSSL for TLS, random numbers and password
+  encryption; iconv for character sets.
+- Runs on Linux, FreeBSD, OpenBSD, NetBSD and Windows 10/11 (console). Tested on
+  Linux and OpenBSD 8.0; the Windows build under Wine.
+- Fully usable from the keyboard; the mouse is optional.
+- Smallest supported terminal: 80 x 25.
+- Licence: GPLv3.
+- Version number in src/main.c (EMSG_VERSION). Every change request raises it
+  by 0.01 (0.9, 0.91, 0.92, ...). It is shown in the menu bar, by `emsg -V`, in the help texts
+  (@VERSION@) and in the User-Agent header (`emsg/VERSION`).
+
+
+2. Security (never to be broken)
+--------------------------------
+
+- Nothing goes over the network unencrypted: IMAP only as IMAPS (TLS),
+  POP3 as POP3S or with required STLS, SMTP with TLS or required STARTTLS.
+  If a server cannot encrypt, emsg refuses to log in or send.
+- TLS 1.2 or later. Server certificates are checked against the system's
+  trusted certificates and the host name.
+- Passwords are never taken from the command line or a URL (a password in a
+  URL is refused).
+- Passwords are stored only when the user chooses so, and only encrypted.
+- The master password and decrypted passwords live only in memory and are
+  overwritten when emsg exits. The master password is never stored.
+- Config file, certificate file and saved unsent text are mode 0600.
+- The MS-DOS version (planned) never stores passwords and keeps TLS session
+  data in memory only (see 18).
+
+
+3. Building
+-----------
+
+- GNU make, a C compiler (GCC or Clang), pkg-config and awk.
+- One Makefile for Linux, FreeBSD, OpenBSD and NetBSD (`uname -s`), using
+  pkg-config where it exists and each system's package location otherwise:
+    Linux    pkg-config for ncursesw and openssl; iconv in libc.
+    FreeBSD  /usr/local (ncurses package); OpenSSL and iconv in base.
+    OpenBSD  base curses (ncurses 6.4) with -D_XOPEN_SOURCE_EXTENDED and
+             -lcurses, base LibreSSL, -liconv from packages in /usr/local.
+    NetBSD   ncursesw from pkgsrc in /usr/pkg (base curses lacks mouse and
+             extended colors), -Wl,-R/usr/pkg/lib.
+- Library flags can be overridden: CURSES_CFLAGS, CURSES_LIBS, SSL_CFLAGS,
+  SSL_LIBS, ICONV_LIBS.
+- Targets: all, install, uninstall, clean, win, dos-bench.
+  `make install` puts emsg in $(PREFIX)/bin and the themes in
+  $(PREFIX)/share/emsg/themes; PREFIX defaults to /usr/local.
+- Compatibility:
+    ncurses before 6.1: init_extended_pair falls back to init_pair (256
+      colors instead of 24-bit); no BUTTON5_PRESSED means no wheel down.
+    LibreSSL has no scrypt: emsg has its own scrypt (RFC 7914, on top of
+      PKCS5_PBKDF2_HMAC with SHA-256). It gives the same keys as OpenSSL's,
+      so stored passwords can be moved between systems.
+    Random numbers from RAND_bytes (no getrandom, rand or sprintf, which
+      OpenBSD's linker warns about).
+- Windows 10/11 (`make win`): cross-compiled on Linux with MinGW-w64
+  (x86_64-w64-mingw32-gcc) into one static emsg.exe (-static: no DLLs but
+  Windows' own). PDCurses 3.8 (wincon) is compiled from its source
+  (PDCURSES=dir) into win/obj/libpdcurses.a with PDC_WIDE, PDC_FORCE_UTF8
+  and PDC_RGB, the same defines emsg uses (compat.h); a mismatch in PDC_RGB
+  swaps red and blue. OpenSSL, zlib and win-iconv from the static mingw64
+  packages (WIN_LIBDIR); also -lpathcch -lbcrypt -lcrypt32 -lws2_32.
+  Result in win/emsg/ (emsg.exe, themes/) and win/emsg.zip.
+  src/compat.h is included first in every file (gcc -include);
+  src/win32.c holds the replacements:
+    files binary (_fmode), console code page UTF-8, Winsock started;
+    HOME = %USERPROFILE%, XDG_CONFIG_HOME = %APPDATA%,
+      XDG_DATA_HOME = %LOCALAPPDATA% when not set (so the rest of emsg uses
+      its normal paths);
+    rename replaces an existing file (MoveFileEx), realpath (_fullpath, '/'),
+    pread, getline, strcasestr, memmem, asprintf, a wcwidth of 1 (PDCurses
+    gives every character one cell), timegm (_mkgmtime), the computer name,
+    mbox locking with LockFileEx, running a command and waiting (the
+    external editor, default notepad; restarting on another account).
+  wchar_t is 16 bits: characters above U+FFFF are shown as U+FFFD; typed
+  ones arrive as two UTF-16 halves and are joined (utf16_join) before they
+  are stored as UTF-8. 256 colors: PDC_set_blink(FALSE) after start_color
+  puts the console in VT mode.
+  win/emsg.manifest (resource win/emsg.rc): active code page UTF-8, so file
+  names in the ANSI calls are UTF-8, and long paths.
+  net.c: Winsock (closesocket, millisecond timeouts, FormatMessage errors);
+  the CA certificates come from the Windows ROOT store plus cacert.pem next
+  to emsg.exe. ui.c: raw mode (Ctrl-C/Q/S are keys; Ctrl-C quits at the
+  next key read), keypad Enter / + - * / as characters, resize_term after
+  KEY_RESIZE, CTL_LEFT/CTL_RIGHT for word moves. Maildir names end in
+  "!2,FLAGS" instead of ":2,FLAGS". Paths like C:\Mail on the command line.
+- Help texts are plain text files in help/, turned into src/helptext.h by
+  tools/txt2c.awk at build time. Lines starting with '#' are comments;
+  @VERSION@ becomes the version:
+    help/cmdline.txt  emsg --help / -h
+    help/usage.txt    after a wrong option
+    help/keys.txt     the F1 help window
+    help/editor.txt   the editor's key line (one line)
+- README.md: per operating system the packages to install and the exact
+  build and install commands.
+
+
+4. Command line
+---------------
+
+  emsg                      the only account, or choose one from a list
+  emsg [options] [WHERE]
+
+  -a NAME   use account NAME (a new one if unknown)
+  -n        set up a new account (asks: IMAP, POP3 or local mail)
+  -f WHERE  where the mail is (same as WHERE on its own)
+  -s SERVER -p PORT -u USER
+  -t THEME  theme name (~/.config/emsg/NAME.theme) or a path to a file
+  -V, --version
+  -h, --help
+
+WHERE:
+  imaps://[USER@]HOST[:PORT][/FOLDER]   port 993, folder INBOX by default
+  pop3s://[USER@]HOST[:PORT]            port 995; 110 means STLS required
+  /path, ~/path, ./path, file://, maildir:, mbox:   local mail
+
+- The user may be an e-mail address: the last '@' ends it (%40 also works).
+- An account with the same server and user (or path) is used; otherwise a new
+  one is made and saved.
+- Without arguments: the only account, last_account, or a list to choose from.
+
+
+5. Configuration files
+----------------------
+
+~/.config/emsg/emsg.conf (mode 0600), key = value, one [account NAME]
+section per account:
+
+  theme = default
+  wrap_width = 72            (20-998)
+  folders_width = 25         percent of the screen
+  list_width = 45            percent (with three columns: of what is left)
+  last_account = Work
+  master_check = enc1$...    the word "emsg" encrypted with the master password
+
+  [account Work]
+  type = imap | pop3 | local
+  full_name, server, port, user, path, address
+  smtp_server, smtp_port, smtp_user, smtp_login, smtp_security = tls | starttls,
+  smtp_password, store_password = yes | no (no = do not ask again;
+  absent = ask), password = enc1$...
+
+- A config from emsg 0.3 (no sections) is read as one account.
+- ~/.config/emsg/certs: always-accepted certificates, `host port sha256`.
+- ~/.config/emsg/NAME.theme: color themes (see 13).
+- ~/.local/share/emsg/ACCOUNT/: local Sent/Drafts of POP3 accounts.
+- ~/.local/share/emsg/unsent-DATE.txt: text saved on Ctrl-Q / Ctrl-C.
+
+
+6. Accounts and login
+---------------------
+
+- A new account first asks the kind: IMAP, POP3 or Local.
+- IMAP/POP3 login dialog: account name, full name, server, port, user,
+  password; the cursor starts on the first empty field.
+- Local dialog: account name, full name, e-mail address (for From:) and the
+  path; default path is the first of ~/Maildir, ~/Mail, ~/mail, $MAIL.
+- A (Account) lists the accounts; the current one is marked *. Enter on it
+  changes name, full name and stored password; Enter on another one or on
+  "New account" restarts emsg with that account.
+- On startup INBOX is opened and the newest message is shown.
+
+
+7. Certificates
+---------------
+
+- When the check fails (self-signed, expired, wrong name, unknown issuer)
+  emsg shows subject, issuer, validity, the problem and the SHA-256
+  fingerprint, with three buttons: Reject, Accept once (this session),
+  Always accept (saved in ~/.config/emsg/certs).
+- If a server with a saved certificate shows a different one, emsg warns
+  that it has changed.
+- Automatic reconnects accept only the certificate accepted at login.
+
+
+8. Stored passwords (src/vault.c)
+---------------------------------
+
+- After the first successful login: Store encrypted / Not now (ask next
+  time, the default) / Don't ask again.
+- A master password is chosen once: typed twice, at least 8 characters.
+  After that emsg asks for the master password at start instead of the
+  account password; Esc skips it and shows the normal login.
+- Key: scrypt(master, salt, N = 2^16, r = 8, p = 1) -> 256 bits; salt of 16
+  random bytes, new for every stored value.
+- Encryption: AES-256-GCM, random 12-byte nonce, 16-byte tag. The text
+  "imap USER@SERVER" (or "smtp USER@SERVER") is the additional data, so a
+  stored password does not decrypt when the server in the config is changed;
+  emsg then says so and asks for the password.
+- Format: enc1$LOG2N$R$P$SALT$NONCE$CIPHERTEXT+TAG (base64 parts).
+- master_check makes a wrong master password known at once.
+- C -> Delete all stored passwords removes them from every account together
+  with master_check. An SMTP password is stored the same way when the
+  account stores its password.
+
+
+9. Mail sources (src/store.c is one interface for all of them)
+--------------------------------------------------------------
+
+IMAP (src/imap.c):
+- IMAP4rev1 over TLS, LOGIN, LIST with RFC 6154 special-use attributes,
+  SELECT, STATUS, UID FETCH of header blocks and flags, BODYSTRUCTURE,
+  partial fetches BODY.PEEK[section]<off.len>, STORE flags, APPEND to Sent
+  and Drafts.
+- Folder names in modified UTF-7, shown decoded, nested by hierarchy.
+- New mail and deletions from untagged responses (EXISTS, EXPUNGE, FETCH);
+  NOOP every 60 s and on F5. The selection stays on the same message.
+- On a dropped connection: reconnect once and repeat the command (password
+  kept in memory for this).
+
+POP3 (src/pop3.c):
+- Port 995 and any port other than 110: TLS from the start. Port 110, or a
+  plain-text greeting: STLS is required, otherwise no login.
+- USER/PASS, LIST, UIDL, TOP for list headers, RETR when a message is
+  opened. Nothing is ever deleted on the server.
+- One INBOX from the server; Sent, Drafts and other folders are local
+  Maildirs in ~/.local/share/emsg/NAME/ (or path =), made when first used.
+- Seen/answered kept per UIDL in .emsg-pop3-state; ids no longer on the
+  server are forgotten.
+- A new session on F5 and every 5 minutes (a POP3 session only sees the
+  mailbox as it was at login); kept alive in between.
+
+Local (src/local.c):
+- Maildir (cur/new/tmp) with Maildir++ subfolders (.Name, names in
+  modified UTF-7). Flags in file names (S seen, R answered, F flagged,
+  T deleted); reading moves a message from new/ to cur/.
+- mbox: only read and appended to, fcntl locking, mboxrd >From quoting.
+  Flags from Status/X-Status; messages read count as seen until exit.
+- MH: numbered files, flags in the unseen/replied/flagged sequences of
+  .mh_sequences (rewritten as a new file, other sequences kept); a saved
+  message gets the next free number.
+- A directory: every Maildir, mbox file and MH folder under it is a folder
+  (subdirectories nest); $MAIL is INBOX when none is found.
+- Sent and Drafts are listed before they exist; the first message saved
+  there creates them, of the kind most folders there are.
+- Changes by other programs are picked up on F5 and every minute.
+
+
+10. Screen layout
+-----------------
+
+  emsg 0.94 Quit Mail Reply Forward heX Header Account Config F1=Help  date time
+  +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
+  |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
+  |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
+  |                                      <>Hello,                        v
+  +------------- TAB=Folders  PgUp/PgDn -++--- Spc=PgDn Shift+Spc/Bksp=PgUp-+
+   user@host  F1 Help  Tab Folders/Emails  <-> Column  Enter Open  F5 Refresh
+
+- Top line: menu bar with the context menu and the clock on the right.
+  Hotkey letters in the HOTKEY color; a mode that is on (heX, Header) is
+  drawn inverted. A click on an item runs it.
+- Three windows: Folders, the email list, the message.
+    up to 150 columns: two windows; left the email list OR the folders,
+      right always the message. Tab switches the left window.
+    more than 150 columns: Folders | List | Message side by side.
+- Box-drawing borders. The window title holds the folder name, number of
+  messages and new ones. The bottom border shows the window's keys
+  (Folders: Enter=Select, plus TAB=Emails when it fits; list: TAB=Folders
+  PgUp/PgDn; message: Spc=PgDn Shift+Spc/Bksp=PgUp).
+- The border between list and message is marked <>. Widths change with
+  Ctrl-Left / Ctrl-Right or by dragging a border with the mouse; they are
+  saved as percentages so they fit after a resize.
+- Bottom line: account, short key help, and status messages.
+- Email list rows: flag (N new, A answered, * flagged, D deleted), subject,
+  sender (display name, shortened with ...), date as YYMMDD.HH:MM. Newest
+  at the top.
+- Folder list: tree, indented per level; folders that cannot be selected
+  are shown but not opened.
+- The message window shows From, To, Cc, Date and Subject, an empty line,
+  then the text. A long message has a scroll bar in its right border
+  (arrows, track, thumb).
+- Dialogs (login, choices, lists, messages, progress, file picker) are
+  boxes drawn over the screen; the screen behind them is redrawn.
+- The screen follows terminal resizes.
+
+
+11. Keys
+--------
+
+Main screen:
+  Tab                  switch the left window (email list / folders)
+  Left / Right         move between the windows
+  Up / Down            move selection / scroll the message
+  PgUp / PgDn          page the list
+  Home / End           first / last
+  Enter                open folder / read message
+  Esc                  back to the email list
+  Space                page down in the message, from every window
+  Shift-Space, Ctrl-Space, Alt-Space, Backspace
+                       page up in the message, from every window
+  M R F                Mail, Reply, Forward (opens the editor)
+  H                    full headers on/off
+  X                    hex dump of the raw message on/off
+  A                    accounts
+  C                    config: outgoing mail (SMTP), account, switch
+                       account, wrap width, delete all stored passwords
+  Ctrl-Left/Right      narrower / wider left column
+  L                    filter the email list (see 15a)
+  F5                   refresh (new mail)
+  Ctrl-L               redraw
+  F1 / ?               help window (help/keys.txt)
+  Q                    quit
+  Ctrl-Q / Ctrl-C      quit at once, from anywhere
+
+Shift-Space: kitty and xterm modifyOtherKeys send CSI 32;2u or
+CSI 27;2;32~ (Alt: ;3, Ctrl: ;5); Ctrl-Space arrives as NUL, Alt-Space as
+ESC + space. All of them page up. Many terminals (VTE, Konsole, tmux, the
+Linux console) send Shift-Space as Space; the help says to use Ctrl-Space,
+Alt-Space or Backspace there.
+
+Ctrl-Q and Ctrl-C (either case) always quit, also in dialogs, the help, the
+file picker and the editor, without questions:
+- connections are closed without waiting for the server;
+- a message being written is saved as ~/.local/share/emsg/unsent-DATE.txt
+  (mode 0600) and its path is printed;
+- XON/XOFF flow control is switched off while emsg runs (so Ctrl-Q and
+  Ctrl-S arrive) and restored at exit;
+- Ctrl-C is a signal: it also stops a network wait (connect, TLS, a slow
+  server). A second Ctrl-C leaves at once, restoring only the terminal;
+- while :e runs an external editor, Ctrl-C belongs to that editor.
+
+
+12. Mouse
+---------
+
+- Clicks only (xterm SGR mouse); mouse movement is asked for (mode 1002)
+  only while a border or scroll thumb is being dragged.
+- Click on a menu bar item: runs it. Click on a dialog button: picks it.
+- Click on an email or folder: selects it and focuses that window. A double
+  click (same row within 400 ms) opens it, like Enter.
+- Drag a column border to resize.
+- Scroll bar: arrow = one line, track = one page, drag the thumb.
+- Wheel: over the message 3 lines; over the email list or folder list it
+  scrolls that list 3 lines without changing the selection or the open
+  message. The next key or click brings the list back to the selection.
+- In the editor: click a menu item, or anywhere in either window to edit
+  there.
+
+
+13. Themes
+----------
+
+- File ~/.config/emsg/NAME.theme, read at every start; NAME from -t or
+  theme = (default "default"). If missing it is created from
+  ./themes/NAME.theme, $(PREFIX)/share/emsg/themes/NAME.theme, or the
+  built-in default colors.
+- Keys: BACKGROUND, TEXT, HIGHLIGHTBG, HIGHLIGHTTXT, MENUBG, MENUTXT,
+  HOTKEY.
+- Colors: black red green yellow blue magenta cyan white, optional
+  bright/light prefix, gray, darkgray, darkblue (#000040), navy, orange,
+  default (the terminal's color), 0-255, #RRGGBB.
+- 24-bit color where the terminal has it; otherwise the nearest of 256
+  colors (darkblue -> 17). With TERM=xterm-256color and
+  COLORTERM=truecolor/24bit the xterm-direct description is used, unless
+  EMSG_NO_DIRECT=1.
+- Shipped: default (PC Tools: white on dark blue, cyan bar, light gray
+  menu, orange hotkeys), mc, dark, mono.
+
+
+14. Showing messages
+--------------------
+
+- Headers decoded: RFC 2047 encoded words, RFC 2231 parameters, any
+  charset through iconv, shown as UTF-8 with correct wide characters.
+- MIME: multipart, base64, quoted-printable. A plain-text part is shown
+  when there is one; otherwise HTML or Markdown is converted to text.
+  Attachments are listed with name, type and size, not downloaded.
+- format=flowed (RFC 3676): soft breaks joined into paragraphs (per quote
+  level), space-stuffing removed, DelSp=yes honoured, wrapped to the window.
+- HTML to text (src/textconv.c):
+    <style>, <script> and <head> left out; character references (named
+      and numeric) become characters;
+    paragraphs and line breaks; h1 underlined with =, h2 with -;
+    bullet and numbered lists, indented when nested (ol start= kept);
+    blockquote as "> "; <pre> exactly as written;
+    links as "text [n]" with a "Links:" list of numbered addresses at the
+      end (no number when the text is the address);
+    images as [image: alt] (left out without alt);
+    data tables (not nested, at least 2 rows and 2 columns, at most 10
+      columns, cells at most 40 wide, at most 110 in total) in aligned
+      columns, with a dashed line under a <th> header row; other tables as
+      their text;
+    at most one empty line in a row, no trailing spaces.
+- Markdown (text/markdown, text/x-markdown): **bold**, *italic*, `code`
+  lose their markers; # headings underlined (levels 1-2); links and images
+  as with HTML; fenced (``` ~~~) and indented code kept as written,
+  indented by 4; lists and quotes unchanged; backslash escapes.
+- H shows all headers; X shows a hex dump of the raw message.
+- The converters must survive any input (fuzzed) and be fast (800 KB in
+  well under a second).
+
+
+15a. Filter
+-----------
+
+- The email list's bottom border shows "fiLter" (L in the hotkey color).
+  L (from any window; the list gets the focus) opens a filter bar in that
+  border: "Filter: text  Enter=Apply  Esc=Leave". Typed text appends,
+  Backspace deletes a character, Ctrl-U all of it.
+- Enter applies: the list shows only messages whose subject or sender
+  contains the text, ignoring case. The title shows "FOLDER filtered  N of M msgs"; the
+  border keeps "Filter: text  L=Edit  Esc=Leave"; the status line says how
+  many match. Enter on empty text removes the filter.
+- Esc leaves the filter, while typing or in the email list: the full list
+  returns with the selection on the same message (with a filter applied,
+  the selection goes to the same or nearest older matching message).
+- Mouse: a click on the list's bottom border opens the bar; on Esc=Leave it
+  ends the filter; while typing, a click elsewhere applies it.
+- IMAP: SEARCH OR SUBJECT x FROM x on the server (CHARSET UTF-8 with
+  literals for non-ASCII text). POP3/local: the headers are read and
+  compared (lower-cased wide characters).
+- The matching sequence numbers are kept (ascending); list row i is
+  match nf-1-i. The header cache works on positions in that list, and
+  headers of scattered matches are fetched with one FETCH of a sequence
+  set (a,b,c:d). New mail/expunges re-run the search. Opening another
+  folder ends the filter.
+
+
+15. Memory and speed
+--------------------
+
+emsg keeps only what is on screen, so folder and message size do not limit
+it (tested with a folder of 250,000 messages):
+- Email list: headers fetched in blocks of 100 around the visible rows, at
+  most 64 blocks kept, least recently used dropped first. Opening a folder
+  fetches 100 headers; End fetches only the last block. While keys are
+  still coming nothing is fetched; rows fill in when typing stops.
+- Message: first the header and BODYSTRUCTURE, then the first 64 KB of each
+  shown text part; the next block when scrolling reaches the end.
+- Hex view: only a 16-64 KB window around the visible bytes.
+- Display: text word-wrapped into an index of line offsets; characters are
+  converted for the screen only for visible lines.
+
+
+16. Writing mail (src/editor.c, src/compose.c)
+----------------------------------------------
+
+Editor (vim-like):
+- M new, R reply (to Reply-To or the sender; In-Reply-To and References
+  set; text quoted with "> "), F forward (original headers and text).
+  The text taken from the original is made valid UTF-8 first (utf8_clean):
+  bytes that are not UTF-8 and C1 controls are read as Windows-1252, other
+  control characters (CR, VT, ...) except tab are left out; otherwise the
+  send check (valid UTF-8, no controls) would refuse it. HTML &#128;-&#159;
+  are Windows-1252 too, as in HTML5.
+- Two windows: header on top, message below. It opens in the header window;
+  Enter adds a header line. Tab goes to the message text; Esc (header or message) to command
+  mode. Down on the last header line goes to the message, Up on the first
+  message line to the header (also from command mode, which then edits).
+- While the header or the message is edited the menu bar shows
+  Esc=leaveEdit EdIt Send Keep Header Wrap aTtach for the mouse; a click
+  leaves editing and runs the command (Esc=leaveEdit goes to command mode). The status line shows the
+  mode, its keys and Ln/Col.
+- A mouse click anywhere in the header or message window (text, empty part,
+  frame) makes it the window being edited; below the text the cursor goes
+  to the last line. The mouse button release must not clear a message.
+- Command mode menu: EdIt Send Keep Header Wrap aTtach.
+    E / I (i a A o O)   edit again
+    S                   send (confirm recipients first)
+    K                   keep: save in Drafts and close
+    H                   header window
+    W                   wrap while typing on/off
+    T                   attach a file
+    gq                  re-wrap the paragraph at the wrap width
+    yy Y dd p P x D J u yank, delete, put, delete char, delete to end,
+                        join, undo
+    arrows, Ctrl-Left/Right (word), b, PgUp PgDn, 0 $, gg G, Ctrl-F/B
+    :q :q! :w :x :e :N  quit, quit without asking, keep, send,
+                        $VISUAL/$EDITOR, go to line N
+    Q, Esc              leave, back to the email list (focus on the list):
+                        Continue editing / Keep as draft / Discard when
+                        changed; Esc after d y g Z only cancels that
+  Menu letters work in both cases (vim's h j k l w are not used).
+- Template: From: Full Name <addr>, To:, Cc:, Bcc:, Subject:, Date: (filled
+  in; replaced by the send time if unchanged), for a reply In-Reply-To: and
+  References:; an empty line, then the text.
+- The header window shows only To, Cc, Bcc, Subject and Attach: lines
+  (continuation lines follow their header). The other header lines (From,
+  Date, In-Reply-To, References) are kept hidden, unchanged, and sent; :e
+  shows the whole text in the external editor. Header lines the writer adds
+  stay visible. A header error in a hidden header is only reported.
+- Wrap: wrap width 72 by default (C -> Wrap width, or wrap_width).
+  On for a new message, off for reply and forward. The last word that does
+  not fit moves to the next line and the rest of the paragraph re-wraps.
+  Quoted lines (>) and too long words are not broken.
+
+Attachments:
+- T opens a file browser (Enter opens a folder, ../ goes up, Enter on a
+  file attaches it; first line "Type a path" for any path, also hidden
+  files). Each file is an "Attach: path" header line (~ = home), which can
+  also be typed or deleted by hand. Not sent as a header.
+- Files are read at send/keep time, 100 MB at most together; the send
+  confirmation shows their number and size.
+- multipart/mixed: the text part, then each file base64 with a type by
+  extension (otherwise application/octet-stream) and
+  Content-Disposition: attachment; long or non-ASCII names per RFC 2231.
+
+Header checks before sending (an error opens the header window on that
+line):
+- From, To, Cc, Bcc, Reply-To, Sender: RFC 5322 address lists (names,
+  quoted names, groups; group syntax or several addresses in From only with
+  Sender, RFC 6854). Local part at most 64 octets; valid domain labels or
+  an address literal. At least one recipient.
+- Date: valid RFC 5322 date-time, day of week checked.
+- Message-ID, In-Reply-To, References: <left@right>.
+- Subject may be empty (the confirmation mentions it).
+- Each header only once; MIME-Version, Content-* and User-Agent are set by
+  emsg; other headers are passed on.
+
+The message that goes out:
+- Date, Message-ID (random, at the From domain) and User-Agent: emsg/VER.
+- Bcc left out of the sent header, kept in the Sent copy.
+- Headers folded at 78, never over 998 characters.
+- Non-ASCII names and subjects as RFC 2047 encoded words; a non-ASCII
+  address: UTF-8 headers (RFC 6532) with SMTPUTF8 when the server has it.
+- Body text/plain; format=flowed, us-ascii or utf-8: soft breaks keep a
+  trailing space, Enter is a hard break (trailing spaces removed), lines
+  starting with a space or "From " are space-stuffed, "-- " kept. 7bit;
+  8bit with 8BITMIME, otherwise quoted-printable (also for lines over 998).
+- A reply to a flowed message re-quotes it as flowed (one more > per
+  paragraph, wrapped at 72 with soft breaks); other quotes line by line.
+- After sending: a copy in Sent (RFC 6154 \Sent or a usual name); the
+  replied message gets \Answered.
+
+
+17. Sending (src/smtp.c)
+------------------------
+
+- From: the login if it is an address, else login@domain with the domain
+  being the IMAP server without imap./imaps./mail.; the confirmation warns
+  when From was changed to another address.
+- Defaults: server smtp.<domain> (or the IMAP server), port 587, same user
+  and password. C -> Outgoing mail changes these, remembered per login.
+- 587: STARTTLS required (RFC 3207). 465: TLS from the start (RFC 8314);
+  another TLS port with smtp_security = tls.
+- EHLO (HELO as fallback) with the host name or an address literal; SIZE,
+  8BITMIME, SMTPUTF8, AUTH PLAIN/LOGIN; dot-stuffing; CRLF; RFC 5321
+  timeouts. If one recipient is refused nothing is sent and that address is
+  shown. Certificates checked as for IMAP.
+- Local accounts send with their SMTP settings; without a stored password
+  emsg asks for one.
+
+
+18. MS-DOS (planned) and the benchmark
+--------------------------------------
+
+The planned DOS version, for 8088/8086 PCs and up under MS-DOS or FreeDOS:
+- IMAPS only; no POP3, local mail or plain IMAP.
+- No stored passwords: asked at every start, kept in memory only.
+- TLS session data in memory only (saved TLS 1.2 session data would let
+  someone decrypt the next session, including the password). A reconnect
+  within one run may resume the session.
+- Server certificates are saved; later logins skip the chain check but
+  still check the server's signature.
+- Open Watcom (16-bit, large model, 8086 instructions), BearSSL 0.6
+  patched for 16-bit int, mTCP for the network.
+
+Already there: a TLS benchmark in dos/ (bench.c, vectors.h with known-answer
+tests, bearssl-0.6-16bit.patch). `make dos-bench WATCOM=... BEARSSL=...`
+builds:
+- BENCH.EXE: 16-bit, i15/m15 arithmetic, any PC from the 8088 up;
+- BENCH32.EXE: 32-bit (wcl386, DOS/32A extender, i31/m31, -fpc so no 387
+  is needed), 386 and up.
+`BENCH FAST` times X25519, ECDH and ECDSA P-256/P-384, RSA-2048/4096,
+SHA-256, ChaCha20-Poly1305 and AES-GCM and writes RESULT.TXT. The README
+holds the results measured in 86Box (8088, V20, 386DX-33 16 and 32 bit) and
+the login times calculated from them.
+
+
+19. Source layout
+-----------------
+
+  src/main.c      state, layout, keys, mouse, login flow, config, accounts
+  src/store.c     one interface for IMAP, POP3 and local folders
+  src/imap.c      IMAP client
+  src/pop3.c      POP3 client
+  src/local.c     Maildir, mbox, MH, POP3 inbox state
+  src/net.c       TCP, TLS, STARTTLS, certificate checks
+  src/smtp.c      SMTP submission
+  src/compose.c   header checks, addresses, encoding, folding, MIME,
+                  format=flowed, attachments
+  src/editor.c    vim-like editor
+  src/msgview.c   open message: parts loaded in blocks, hex window
+  src/mime.c      RFC 2047, multipart, base64/QP, iconv, flowed
+  src/textconv.c  HTML and Markdown to text
+  src/ui.c        boxes, menu bar with clock, dialogs, input fields
+  src/theme.c     theme files and color pairs
+  src/vault.c     scrypt + AES-256-GCM stored passwords
+  src/util.c      buffers, UTF-8 helpers
+  src/compat.h    Windows: replaces missing POSIX names (gcc -include)
+  src/win32.c     Windows: the replacement functions
+  win/            Windows manifest and resource; build output
+  help/*.txt      help texts; tools/txt2c.awk; themes/*.theme
+  dos/            MS-DOS TLS benchmark and BearSSL patch
+
+
+20. Order of building (as it was done)
+--------------------------------------
+
+ 1. Login to an IMAPS server
+ 2. Folder structure
+ 3. Messages of the selected folder (default INBOX)
+ 4. List with subject, from, date YYMMDD.HH:MM
+ 5. Show the latest message
+ 6. Vim-like editor and sending over SMTP
+ 7. Accounts, full name, encrypted stored passwords
+ 8. POP3 and local mailboxes (Maildir, mbox, MH)
+ 9. Attachments when writing
+10. HTML and Markdown as text, mouse selection and wheel, portability to
+    the BSDs, MS-DOS study
+
+Next: open drafts again, save received attachments, reply-all.

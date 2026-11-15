@@ -1,0 +1,8 @@
+# Dark terminal theme
+BACKGROUND   = black
+TEXT         = lightgray
+HIGHLIGHTBG  = blue
+HIGHLIGHTTXT = brightwhite
+MENUBG       = darkgray
+MENUTXT      = brightwhite
+HOTKEY       = orange

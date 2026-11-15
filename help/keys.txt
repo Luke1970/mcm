@@ -1,0 +1,73 @@
+# Help window shown by F1 or ? in emsg. Edit it, then run make (see cmdline.txt).
+emsg @VERSION@ - console mail client
+
+Tab                  switch the left window: email list / folders
+                     (more than 150 columns: all three are shown)
+Left / Right         move between the windows
+Up / Down            move selection / scroll message
+PgUp / PgDn          page through the message list
+Space                page down in the message (from every window)
+Shift-/Ctrl-/Alt-Space, Bksp
+                     page up in the message (from every window;
+                     many terminals send Shift-Space as Space:
+                     use Ctrl-Space, Alt-Space or Backspace there)
+Home / End           first / last
+Enter                open folder / read message
+Esc                  back to message list
+
+H  Header            toggle full message headers
+X  heX               toggle hex dump of raw message
+M R F                Mail / Reply / Forward (opens the editor;
+                     T there attaches a file)
+A  Account           switch account, name, full name, password
+C  Config            SMTP, account, wrap width, delete passwords
+Ctrl-← / Ctrl-→      narrower / wider left column (or drag the border)
+L  fiLter            show only emails whose subject or sender
+                     contains a text; Enter applies, Esc leaves
+                     the filter (also in the email list)
+F5                   refresh folder (new mail)
+Ctrl-L               redraw screen
+F1 / ?               this help
+Q                    quit
+Ctrl-Q / Ctrl-C      quit at once, from anywhere (also in dialogs and
+                     the editor; text being written is saved in
+                     ~/.local/share/emsg/unsent-DATE.txt). Ctrl-C also
+                     stops a network wait; twice: leave immediately
+Mouse                click the list's bottom border to filter
+                     (Esc=Leave there ends it);
+                     click an email or folder to select it, double
+                     click to open it; click a menu bar item; drag
+                     the column border; scroll bar: ▲ ▼ line, track
+                     page, drag the thumb; the wheel scrolls the
+                     message and the lists (a key brings a list
+                     back to its selection)
+
+Message list: N = new, A = answered, * = flagged, D = deleted
+
+Libraries and software used:
+  ncurses       screen, keys and mouse - Zeyd M. Ben-Halim,
+                Eric S. Raymond, Juergen Pfeifer, Thomas E. Dickey
+  OpenSSL       TLS; scrypt and AES-256-GCM for stored passwords -
+                The OpenSSL Project (from SSLeay by Eric A. Young
+                and Tim J. Hudson)
+  zlib          used by OpenSSL - Jean-loup Gailly, Mark Adler
+  C library     sockets, iconv, locale - glibc or the system's own
+  Build tools   C compiler (GCC or Clang), make, awk, pkg-config
+  Claude Code   emsg was written with Claude Code, Anthropic's AI
+                coding assistant
+
+Thanks to:
+  PC Tools (Central Point Software) and Midnight Commander (Miguel
+  de Icaza and its developers) for the look; vim (Bram Moolenaar)
+  for the editor keys; xterm (Thomas E. Dickey) for mouse and colors.
+  Colin Percival (scrypt); Joan Daemen, Vincent Rijmen (AES);
+  David McGrew, John Viega (GCM).
+  D. J. Bernstein (Maildir), Sam Varshavchik (Maildir++), the RAND
+  Corporation and the nmh developers (MH), Unix mail (mbox).
+  The authors of the standards emsg follows, among them:
+    IMAP      Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman
+    POP3      John Myers, Marshall Rose (RFC 1939); Chris Newman
+    SMTP      John Klensin (RFC 5321); Paul Hoffman (RFC 3207)
+    Messages  Pete Resnick (RFC 5322); Ned Freed, Nathaniel
+              Borenstein (MIME); Keith Moore (RFC 2047, 2231);
+              Randall Gellens (format=flowed, RFC 3676)

@@ -1,0 +1,97 @@
+--- a/src/ssl/ssl_engine.c
++++ b/src/ssl/ssl_engine.c
+@@ -1325,10 +1325,13 @@
+ 	int prf_id, const void *pms, size_t pms_len)
+ {
+ 	br_tls_prf_impl iprf;
+-	br_tls_prf_seed_chunk seed[2] = {
+-		{ cc->client_random, sizeof cc->client_random },
+-		{ cc->server_random, sizeof cc->server_random }
+-	};
++	br_tls_prf_seed_chunk seed[2];
++
++	/* set one by one: 16-bit compilers want constant initializers */
++	seed[0].data = cc->client_random;
++	seed[0].len = sizeof cc->client_random;
++	seed[1].data = cc->server_random;
++	seed[1].len = sizeof cc->server_random;
+ 
+ 	iprf = br_ssl_engine_get_PRF(cc, prf_id);
+ 	iprf(cc->session.master_secret, sizeof cc->session.master_secret,
+@@ -1343,10 +1346,13 @@
+ 	size_t half_len, unsigned char *kb)
+ {
+ 	br_tls_prf_impl iprf;
+-	br_tls_prf_seed_chunk seed[2] = {
+-		{ cc->server_random, sizeof cc->server_random },
+-		{ cc->client_random, sizeof cc->client_random }
+-	};
++	br_tls_prf_seed_chunk seed[2];
++
++	/* set one by one: 16-bit compilers want constant initializers */
++	seed[0].data = cc->server_random;
++	seed[0].len = sizeof cc->server_random;
++	seed[1].data = cc->client_random;
++	seed[1].len = sizeof cc->client_random;
+ 
+ 	iprf = br_ssl_engine_get_PRF(cc, prf_id);
+ 	iprf(kb, half_len << 1,
+--- a/src/symcipher/poly1305_ctmul32.c
++++ b/src/symcipher/poly1305_ctmul32.c
+@@ -51,7 +51,8 @@
+ 	while (len > 0) {
+ 		unsigned char tmp[16];
+ 		uint32_t b[10];
+-		unsigned u, v;
++		unsigned u;
++		uint32_t v;      /* holds up to 19 bits: not 'unsigned' (16 bits on 8086) */
+ 		uint32_t z, cc1, cc2;
+ 
+ 		/*
+@@ -71,34 +72,34 @@
+ 		v = br_dec16le(buf);
+ 		a[0] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[2] << 3;
+-		v |= buf[3] << 11;
++		v |= (uint32_t)buf[2] << 3;
++		v |= (uint32_t)buf[3] << 11;
+ 		a[1] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[4] << 6;
++		v |= (uint32_t)buf[4] << 6;
+ 		a[2] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[5] << 1;
+-		v |= buf[6] << 9;
++		v |= (uint32_t)buf[5] << 1;
++		v |= (uint32_t)buf[6] << 9;
+ 		a[3] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[7] << 4;
+-		v |= buf[8] << 12;
++		v |= (uint32_t)buf[7] << 4;
++		v |= (uint32_t)buf[8] << 12;
+ 		a[4] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[9] << 7;
++		v |= (uint32_t)buf[9] << 7;
+ 		a[5] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[10] << 2;
+-		v |= buf[11] << 10;
++		v |= (uint32_t)buf[10] << 2;
++		v |= (uint32_t)buf[11] << 10;
+ 		a[6] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[12] << 5;
++		v |= (uint32_t)buf[12] << 5;
+ 		a[7] += v & 0x01FFF;
+ 		v = br_dec16le(buf + 13);
+ 		a[8] += v & 0x01FFF;
+ 		v >>= 13;
+-		v |= buf[15] << 3;
++		v |= (uint32_t)buf[15] << 3;
+ 		a[9] += v | 0x00800;
+ 
+ 		/*

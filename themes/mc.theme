@@ -1,0 +1,8 @@
+# Midnight Commander style
+BACKGROUND   = blue
+TEXT         = lightgray
+HIGHLIGHTBG  = cyan
+HIGHLIGHTTXT = black
+MENUBG       = cyan
+MENUTXT      = black
+HOTKEY       = orange
