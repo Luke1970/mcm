@@ -92,7 +92,7 @@ struct local {
 	size_t    raw_hlen;
 };
 
-static void seterr(local_t *l, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 2, 3)));
+static void seterr(local_t *l, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 2, 3)));
 static void seterr(local_t *l, const char *fmt, ...)
 {
 	va_list ap;
@@ -312,7 +312,7 @@ static void ps_save(local_t *l)
 		buf_free(&tmp);
 		return;
 	}
-	fprintf(f, "# emsg: POP3 messages already seen (S) or answered (R), by unique id\n");
+	fprintf(f, "# mcm: POP3 messages already seen (S) or answered (R), by unique id\n");
 	for (int i = 0; i < l->nps; i++)
 		if (l->ps[i].fl[0]) fprintf(f, "%s %s\n", l->ps[i].id, l->ps[i].fl);
 	int bad = ferror(f);
@@ -740,7 +740,7 @@ static int seq_update(local_t *l, const char *dir, const char *name, int v, int 
 	seqs_free(q, n);
 	char *p = path_join(dir, ".mh_sequences");
 	buf_t tmp = {0};
-	buf_printf(&tmp, "%s.emsg%d", p, (int)getpid());
+	buf_printf(&tmp, "%s.mcm%d", p, (int)getpid());
 	int rc = -1;
 	int fd = open(tmp.d, O_WRONLY | O_CREAT | O_TRUNC, 0600);
 	if (fd >= 0) {
@@ -1498,7 +1498,7 @@ static int append_mbox(local_t *l, const char *path, const char *flags, const bu
 	strftime(wd_mon, sizeof wd_mon, "%a %b", &tm);
 	snprintf(date, sizeof date, "%s %2d %02d:%02d:%02d %d", wd_mon, tm.tm_mday, tm.tm_hour, tm.tm_min,
 	         tm.tm_sec, tm.tm_year + 1900);
-	buf_printf(&o, "From emsg@localhost %s\n", date);
+	buf_printf(&o, "From mcm@localhost %s\n", date);
 	const char *st_flags = flags && strstr(flags, "\\Seen") ? "RO" : "O";
 	buf_printf(&o, "Status: %s\n", st_flags);
 	if (flags && strstr(flags, "\\Draft")) buf_adds(&o, "X-Status: T\n");

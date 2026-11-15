@@ -1,4 +1,4 @@
-/* emsg - console email client in the spirit of PC Tools and Midnight Commander
+/* mcm - console email client in the spirit of PC Tools and Midnight Commander
  *
  * Three columns: Folders | Message list | Message.  Two are visible at a time:
  *   focus on Folders           -> Folders + Message list
@@ -31,7 +31,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define EMSG_VERSION   "0.94"
+#define MCM_VERSION   "0.95"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -48,7 +48,7 @@ struct chunk {
 	unsigned long used;
 };
 
-/* One mail account; all of them are kept in emsg.conf. */
+/* One mail account; all of them are kept in mcm.conf. */
 typedef struct {
 	char  name[64];            /* [account NAME] in the config file */
 	int   type;                /* STORE_IMAP, STORE_POP3 or STORE_LOCAL (store.h) */
@@ -73,7 +73,7 @@ static char       last_account[64];
 static char      *master_check;    /* encrypted known text: verifies the master password */
 static char      *master;          /* master password, in memory only once typed */
 
-/* Settings of the program (emsg.conf, before the accounts) */
+/* Settings of the program (mcm.conf, before the accounts) */
 static int wrap_width = 72;        /* new mail is wrapped at this column */
 static int col_pct[2] = {25, 45};  /* left column width in % of the screen:
                                     * [0] Folders | List, [1] List | Message */
@@ -154,7 +154,7 @@ static int  wide(void);
 static void account_menu(void);
 static void config_menu(void);
 static int  smtp_settings(const char *err, void (*bg)(void));
-static void set_status(const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 1, 2)));
+static void set_status(const char *fmt, ...) __attribute__((format(MCM_PRINTF, 1, 2)));
 static void set_status(const char *fmt, ...)
 {
 	va_list ap;
@@ -164,20 +164,60 @@ static void set_status(const char *fmt, ...)
 }
 
 /* ------------------------------------------------------------------ */
-/* Config: ~/.config/emsg/emsg.conf                                    */
+/* Config: ~/.config/mcm/mcm.conf                                    */
 /*                                                                     */
 /*     theme = default                                                 */
 /*     last_account = work                                             */
 /*     [account work]                                                  */
 /*     full_name = ...   server = ...   user = ...   ...               */
 /*                                                                     */
-/* A file without [account] sections (emsg 0.3) is read as one account. */
+/* A file without [account] sections (mcm 0.3) is read as one account. */
+
+/* Before 0.95 the program was called emsg: its folders (~/.config/emsg,
+ * ~/.local/share/emsg, or %APPDATA%\emsg and %LOCALAPPDATA%\emsg) are
+ * renamed once, and emsg.conf becomes mcm.conf. Account paths that pointed
+ * into the old data folder are rewritten by config_load. */
+static char old_data[1024], new_data[1024];
+static int path_moved;            /* an account path was rewritten: save */
+static void config_save(void);
+
+static void base_dir(char *p, size_t n, const char *xdg_var, const char *home_sub, const char *name)
+{
+	const char *xdg = getenv(xdg_var), *home = getenv("HOME");
+	if (xdg && *xdg) snprintf(p, n, "%s/%s", xdg, name);
+	else snprintf(p, n, "%s/%s/%s", home ? home : ".", home_sub, name);
+}
+
+static int is_dir(const char *p)
+{
+	struct stat st;
+	return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static void migrate_from_emsg(void)
+{
+	char o[1024], nw[1024];
+	base_dir(o, sizeof o, "XDG_CONFIG_HOME", ".config", "emsg");
+	base_dir(nw, sizeof nw, "XDG_CONFIG_HOME", ".config", "mcm");
+	if (!is_dir(nw) && is_dir(o) && rename(o, nw) == 0) {
+		char a[1100], b[1100];
+		snprintf(a, sizeof a, "%s/emsg.conf", nw);
+		snprintf(b, sizeof b, "%s/mcm.conf", nw);
+		rename(a, b);
+	}
+	base_dir(o, sizeof o, "XDG_DATA_HOME", ".local/share", "emsg");
+	base_dir(nw, sizeof nw, "XDG_DATA_HOME", ".local/share", "mcm");
+	if (!is_dir(nw) && is_dir(o) && rename(o, nw) == 0) {
+		snprintf(old_data, sizeof old_data, "%s", o);
+		snprintf(new_data, sizeof new_data, "%s", nw);
+	}
+}
 
 static void config_path(char *p, size_t n, const char *file)
 {
 	const char *xdg = getenv("XDG_CONFIG_HOME"), *home = getenv("HOME");
-	if (xdg && *xdg) snprintf(p, n, "%s/emsg%s%s", xdg, file ? "/" : "", file ? file : "");
-	else snprintf(p, n, "%s/.config/emsg%s%s", home ? home : ".", file ? "/" : "", file ? file : "");
+	if (xdg && *xdg) snprintf(p, n, "%s/mcm%s%s", xdg, file ? "/" : "", file ? file : "");
+	else snprintf(p, n, "%s/.config/mcm%s%s", home ? home : ".", file ? "/" : "", file ? file : "");
 }
 
 static void set_secret(char **slot, char *v)
@@ -224,7 +264,7 @@ static void account_name(account_t *a)
 static void config_load(void)
 {
 	char p[1024], line[4096];
-	config_path(p, sizeof p, "emsg.conf");
+	config_path(p, sizeof p, "mcm.conf");
 	FILE *f = fopen(p, "r");
 	if (!f) return;
 	account_t *a = NULL;
@@ -262,7 +302,22 @@ static void config_load(void)
 		if (!a && !(a = account_new(NULL))) break;   /* old file: settings without a section */
 		if (!strcasecmp(k, "type"))
 			a->type = !strcasecmp(v, "pop3") ? STORE_POP3 : !strcasecmp(v, "local") ? STORE_LOCAL : STORE_IMAP;
-		else if (!strcasecmp(k, "path")) snprintf(a->path, sizeof a->path, "%s", v);
+		else if (!strcasecmp(k, "path")) {
+			size_t ol = strlen(old_data);
+			if (ol && !strncmp(v, old_data, ol) && (v[ol] == '/' || !v[ol])) {
+				buf_t np = {0};                          /* moved (emsg) */
+				buf_printf(&np, "%s%s", new_data, v + ol);
+				if (np.len < sizeof a->path) {
+					memcpy(a->path, np.d, np.len + 1);
+					path_moved = 1;
+				} else {
+					snprintf(a->path, sizeof a->path, "%s", v);
+				}
+				buf_free(&np);
+			} else {
+				snprintf(a->path, sizeof a->path, "%s", v);
+			}
+		}
 		else if (!strcasecmp(k, "full_name")) snprintf(a->fullname, sizeof a->fullname, "%s", v);
 		else if (!strcasecmp(k, "server")) snprintf(a->host, sizeof a->host, "%s", v);
 		else if (!strcasecmp(k, "port")) snprintf(a->port, sizeof a->port, "%s", v);
@@ -280,6 +335,7 @@ static void config_load(void)
 	}
 	fclose(f);
 	for (int i = 0; i < naccts; i++) account_name(&accts[i]);
+	if (path_moved) config_save();
 }
 
 static void config_mkdir(void)
@@ -298,7 +354,7 @@ static void config_save(void)
 {
 	char p[1100], tmp[1110];
 	config_mkdir();
-	config_path(p, sizeof p, "emsg.conf");
+	config_path(p, sizeof p, "mcm.conf");
 	snprintf(tmp, sizeof tmp, "%s.new", p);
 	if (ac) {
 		account_name(ac);
@@ -310,7 +366,7 @@ static void config_save(void)
 		if (fd >= 0) close(fd);
 		return;
 	}
-	fprintf(f, "# emsg settings, one [account NAME] section per mail account.\n"
+	fprintf(f, "# mcm settings, one [account NAME] section per mail account.\n"
 	           "# Passwords are only stored when you choose so, encrypted with your\n"
 	           "# master password (scrypt + AES-256-GCM, see the README).\n\n");
 	fprintf(f, "theme = %s\n", A.theme);
@@ -984,14 +1040,14 @@ static void login_bg(void)
 	bkgdset(' ' | COLOR_PAIR(CP_NORMAL));
 	erase();
 	ui_menubar(NULL, 0, 0);
-	ui_puts(0, 1, "emsg " EMSG_VERSION, 12, A_BOLD, CP_MENU);
+	ui_puts(0, 1, "mcm " MCM_VERSION, 12, A_BOLD, CP_MENU);
 	ui_fill(LINES - 1, 0, 1, COLS, CP_MENU);
 }
 
 /* ------------------------------------------------------------------ */
 /* Actions                                                             */
 
-static void now_status(const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 1, 2)));
+static void now_status(const char *fmt, ...) __attribute__((format(MCM_PRINTF, 1, 2)));
 static void now_status(const char *fmt, ...)
 {
 	va_list ap;
@@ -1218,7 +1274,7 @@ static void show_help(void)
 		const char *s = HELP_KEYS[i], *v;
 		while ((v = strstr(s, "@VERSION@"))) {
 			buf_add(&b, s, (size_t)(v - s));
-			buf_adds(&b, EMSG_VERSION);
+			buf_adds(&b, MCM_VERSION);
 			s = v + 9;
 		}
 		buf_adds(&b, s);
@@ -1446,7 +1502,7 @@ static int handle_key(int ch)
 
 /* ------------------------------------------------------------------ */
 /* Untrusted certificates                                              */
-/* ~/.config/emsg/certs holds "host port sha256" for certificates the   */
+/* ~/.config/mcm/certs holds "host port sha256" for certificates the   */
 /* user chose to always accept.                                        */
 
 /* 1 = this exact certificate is stored, -1 = a different one is stored
@@ -1486,7 +1542,7 @@ static int cert_store(const net_certinfo *ci)
 				fputs(line, out);
 		fclose(in);
 	} else {
-		fputs("# certificates accepted in emsg: host port sha256-fingerprint\n", out);
+		fputs("# certificates accepted in mcm: host port sha256-fingerprint\n", out);
 	}
 	fprintf(out, "%s %s %s\n", ci->host, ci->port, ci->sha256);
 	int bad = ferror(out);
@@ -1535,7 +1591,7 @@ static int cert_check(const net_certinfo *ci, void *ctx)
 /* ------------------------------------------------------------------ */
 /* Composing and sending                                               */
 
-#define USER_AGENT "emsg/" EMSG_VERSION
+#define USER_AGENT "mcm/" MCM_VERSION " (Mail Commander)"
 
 static ui_bg_fn smtp_bg = NULL;      /* dialog background while sending */
 
@@ -1593,6 +1649,8 @@ static void smtp_derive(void)
 /* ------------------------------------------------------------------ */
 /* Accounts and stored passwords                                       */
 
+/* Keeps the program's old name (emsg): master_check values written by
+ * earlier versions must still decrypt. Do not change. */
 #define MASTER_AAD "emsg master password check"
 
 /* What a stored password belongs to; it is authenticated with it, so it
@@ -1811,7 +1869,7 @@ static void account_settings(void)
 	set_status("Account %s saved", ac->name);
 }
 
-/* Restart emsg on another account (name NULL = a new one). */
+/* Restart mcm on another account (name NULL = a new one). */
 static void switch_account(const char *name)
 {
 	char nm[64];
@@ -1822,9 +1880,9 @@ static void switch_account(const char *name)
 	vault_free(master);
 	master = NULL;
 #ifdef _WIN32
-	/* no exec: run emsg again in this console and wait for it */
+	/* no exec: run mcm again in this console and wait for it */
 	char cmd[1200];
-	snprintf(cmd, sizeof cmd, "\"%s/emsg.exe\" %s", win_exe_dir(), name ? "-a \"" : "-n");
+	snprintf(cmd, sizeof cmd, "\"%s/mcm.exe\" %s", win_exe_dir(), name ? "-a \"" : "-n");
 	if (name) {
 		size_t k = strlen(cmd);
 		for (const char *c = nm; *c && k + 3 < sizeof cmd; c++)
@@ -1833,12 +1891,12 @@ static void switch_account(const char *name)
 		cmd[k] = '\0';
 	}
 	int rc = win_run(cmd);
-	if (rc < 0) perror("emsg: restart");
+	if (rc < 0) perror("mcm: restart");
 	exit(rc < 0 ? 1 : rc);
 #else
-	char *argv[] = {"emsg", name ? "-a" : "-n", name ? nm : NULL, NULL};
+	char *argv[] = {"mcm", name ? "-a" : "-n", name ? nm : NULL, NULL};
 	execv("/proc/self/exe", argv);
-	perror("emsg: restart");
+	perror("mcm: restart");
 	exit(1);
 #endif
 }
@@ -2385,8 +2443,8 @@ static void pop3_default_path(char *out, size_t n)
 	snprintf(nm, sizeof nm, "%s", ac->name);
 	for (char *c = nm; *c; c++)
 		if (*c == '/' || *c == '\\' || (*c == '.' && c == nm)) *c = '_';
-	if (xdg && *xdg) snprintf(out, n, "%.300s/emsg/%.60s", xdg, nm);
-	else snprintf(out, n, "%.300s/.local/share/emsg/%.60s", home ? home : ".", nm);
+	if (xdg && *xdg) snprintf(out, n, "%.300s/mcm/%.60s", xdg, nm);
+	else snprintf(out, n, "%.300s/.local/share/mcm/%.60s", home ? home : ".", nm);
 }
 
 /* Usual places of local mail: ~/Maildir, ~/Mail, $MAIL. */
@@ -2518,7 +2576,13 @@ static int do_login(void)
 				if (!*ac->path) pop3_default_path(ac->path, sizeof ac->path);
 				char full[1024], state[1100];
 				expand_home(full, sizeof full, ac->path);
-				snprintf(state, sizeof state, "%s/.emsg-pop3-state", full);
+				snprintf(state, sizeof state, "%s/.mcm-pop3-state", full);
+				struct stat sst;
+				if (stat(state, &sst) != 0) {          /* from emsg (before 0.95) */
+					char old[1100];
+					snprintf(old, sizeof old, "%s/.emsg-pop3-state", full);
+					rename(old, state);
+				}
 				if (store_open_local(A.im, full, state) == 0) return 0;
 				char m[700];
 				snprintf(m, sizeof m, "Local folders: %s", store_error(A.im));
@@ -2596,10 +2660,10 @@ static int parse_url(const char *url)
 		ac->type = STORE_POP3;
 		def_port = "995";
 	} else if (!strncasecmp(p, "imap://", 7) || !strncasecmp(p, "pop3://", 7)) {
-		fprintf(stderr, "emsg: only imaps:// and pop3s:// (over TLS) are supported\n");
+		fprintf(stderr, "mcm: only imaps:// and pop3s:// (over TLS) are supported\n");
 		return -1;
 	} else if (strstr(p, "://")) {
-		fprintf(stderr, "emsg: not an imaps:// or pop3s:// URL: %s\n", url);
+		fprintf(stderr, "mcm: not an imaps:// or pop3s:// URL: %s\n", url);
 		return -1;
 	}
 	A.type_given = 1;
@@ -2614,7 +2678,7 @@ static int parse_url(const char *url)
 		const char *semi = memchr(p, ';', ulen);       /* ;AUTH=... */
 		if (semi) ulen = (size_t)(semi - p);
 		if (memchr(p, ':', ulen)) {
-			fprintf(stderr, "emsg: leave the password out of the URL; "
+			fprintf(stderr, "mcm: leave the password out of the URL; "
 			                "it is asked for at login\n");
 			return -1;
 		}
@@ -2655,12 +2719,12 @@ static int parse_url(const char *url)
 	}
 	return 0;
 bad:
-	fprintf(stderr, "emsg: bad URL: %s\n"
+	fprintf(stderr, "mcm: bad URL: %s\n"
 	                "      expected imaps://[user@]host[:port][/folder], pop3s://[user@]host[:port]\n"
 	                "      or a path to local mail\n", url);
 	return -1;
 toolong:
-	fprintf(stderr, "emsg: URL part too long: %s\n", url);
+	fprintf(stderr, "mcm: URL part too long: %s\n", url);
 	return -1;
 }
 
@@ -2670,7 +2734,7 @@ static void print_lines(FILE *f, const char *const *lines)
 	for (int i = 0; lines[i]; i++) {
 		const char *s = lines[i], *v;
 		while ((v = strstr(s, "@VERSION@"))) {
-			fprintf(f, "%.*s%s", (int)(v - s), s, EMSG_VERSION);
+			fprintf(f, "%.*s%s", (int)(v - s), s, MCM_VERSION);
 			s = v + 9;
 		}
 		fprintf(f, "%s\n", s);
@@ -2684,7 +2748,7 @@ static void quit_now(void)
 	char saved[1200];
 	editor_save_unsent(saved, sizeof saved);
 	ui_end();
-	if (*saved) fprintf(stderr, "emsg: the message you were writing is saved in %s\n", saved);
+	if (*saved) fprintf(stderr, "mcm: the message you were writing is saved in %s\n", saved);
 	store_free(A.im);
 	vault_free(master);
 	vault_free(A.smtp_pass);
@@ -2738,6 +2802,7 @@ static account_t *choose_account(const char *opt_a, int opt_n, const account_t *
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, "");
+	migrate_from_emsg();
 #ifdef SIGPIPE
 	signal(SIGPIPE, SIG_IGN);
 #endif
@@ -2751,7 +2816,7 @@ int main(int argc, char **argv)
 	int opt_n = 0;
 	for (int i = 1; i < argc && strcmp(argv[i], "--"); i++) {
 		if (!strcmp(argv[i], "--help")) { help(); return 0; }
-		if (!strcmp(argv[i], "--version")) { puts("emsg " EMSG_VERSION); return 0; }
+		if (!strcmp(argv[i], "--version")) { puts("Mail Commander (mcm) " MCM_VERSION); return 0; }
 	}
 	int c;
 	while ((c = getopt(argc, argv, "a:ns:p:u:t:f:hV")) != -1) {
@@ -2763,7 +2828,7 @@ int main(int argc, char **argv)
 		case 'p': snprintf(ac->port, sizeof ac->port, "%s", optarg); break;
 		case 'u': snprintf(ac->user, sizeof ac->user, "%s", optarg); break;
 		case 't': snprintf(A.theme, sizeof A.theme, "%s", optarg); break;
-		case 'V': puts("emsg " EMSG_VERSION); return 0;
+		case 'V': puts("Mail Commander (mcm) " MCM_VERSION); return 0;
 		case 'h': help(); return 0;
 		default: usage(); return 2;
 		}
@@ -2772,7 +2837,7 @@ int main(int argc, char **argv)
 	if (optind == argc - 1 && parse_url(argv[optind]) < 0) return 2;
 	ac = NULL;
 
-	/* colors: the text file ~/.config/emsg/NAME.theme, read at every start */
+	/* colors: the text file ~/.config/mcm/NAME.theme, read at every start */
 	theme_t theme;
 	theme_defaults(&theme);
 	char theme_err[1200] = "";

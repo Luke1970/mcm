@@ -19,8 +19,8 @@
  *
  * and the SMTP envelope (MAIL FROM / RCPT TO) that goes with it.
  */
-#ifndef EMSG_COMPOSE_H
-#define EMSG_COMPOSE_H
+#ifndef MCM_COMPOSE_H
+#define MCM_COMPOSE_H
 
 #include <stddef.h>
 #include <time.h>

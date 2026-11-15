@@ -1,6 +1,6 @@
 /* ui.h - ncurses drawing primitives and dialogs */
-#ifndef EMSG_UI_H
-#define EMSG_UI_H
+#ifndef MCM_UI_H
+#define MCM_UI_H
 
 #ifndef NCURSES_WIDECHAR
 #define NCURSES_WIDECHAR 1
@@ -24,7 +24,7 @@
 #define UI_HOT_CAPS (-2)
 #define UI_HOT_KEYNAME (-3)   /* hotkey is the text before '=', e.g. "F1=Help" */
 
-/* Ctrl-Q and Ctrl-C quit emsg from anywhere: every key is read with
+/* Ctrl-Q and Ctrl-C quit mcm from anywhere: every key is read with
  * ui_getch() or ui_get_wch(), which call the function set here (it does not
  * return) on Ctrl-Q, or once Ctrl-C has set quit_requested (util.h). Ctrl-C
  * also stops network waits; a second Ctrl-C leaves at once. */

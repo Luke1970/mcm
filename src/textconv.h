@@ -13,8 +13,8 @@
  * (**bold**, *italic*, `code`, # headings), code blocks are kept as written
  * (indented), lists and quotes stay as they are.
  */
-#ifndef EMSG_TEXTCONV_H
-#define EMSG_TEXTCONV_H
+#ifndef MCM_TEXTCONV_H
+#define MCM_TEXTCONV_H
 
 #include "util.h"
 

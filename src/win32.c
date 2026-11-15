@@ -1,4 +1,4 @@
-/* win32.c - POSIX functions emsg uses that Windows lacks (see compat.h).
+/* win32.c - POSIX functions mcm uses that Windows lacks (see compat.h).
  * Only built for Windows. */
 #ifdef _WIN32
 
@@ -30,7 +30,7 @@ static void env_from(const char *name, const char *from, const char *sub)
 }
 
 /* Before main: files are binary (no \n -> \r\n), the console speaks UTF-8,
- * the configuration goes to %APPDATA%\emsg, data to %LOCALAPPDATA%\emsg,
+ * the configuration goes to %APPDATA%\mcm, data to %LOCALAPPDATA%\mcm,
  * and sockets work. */
 __attribute__((constructor)) static void win_start(void)
 {

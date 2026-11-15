@@ -138,8 +138,8 @@ int main(int argc, char **argv)
 	double per;
 	char extra[64];
 	remove("RESULT.TXT");
-	fputs("emsg TLS bench - BearSSL 0.6, " BITS " build\n", stdout);
-	logline("emsg TLS bench - BearSSL 0.6, " BITS " build\n");
+	fputs("mcm TLS bench - BearSSL 0.6, " BITS " build\n", stdout);
+	logline("mcm TLS bench - BearSSL 0.6, " BITS " build\n");
 	{
 		/* does the BIOS clock tick? (all timings depend on it) */
 		unsigned long t0 = ticks(), n = 0;

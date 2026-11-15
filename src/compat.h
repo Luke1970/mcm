@@ -4,8 +4,8 @@
  * -include). It pulls in the C library headers that declare mkdir, rename and
  * the like, and only then replaces those names, so the declarations stay as
  * they are. The functions live in win32.c. On other systems it is empty. */
-#ifndef EMSG_COMPAT_H
-#define EMSG_COMPAT_H
+#ifndef MCM_COMPAT_H
+#define MCM_COMPAT_H
 
 #ifdef _WIN32
 
@@ -36,7 +36,7 @@
 #define PDC_NCMOUSE 1
 #define PDC_RGB 1
 
-#define EMSG_PRINTF gnu_printf
+#define MCM_PRINTF gnu_printf
 
 /* Maildir: ':' cannot be in a Windows file name; "!" is what other Windows
  * Maildir programs use. */
@@ -70,7 +70,7 @@ int     win_wcwidth(wchar_t c);
 int     win_asprintf(char **out, const char *fmt, ...) __attribute__((format(gnu_printf, 2, 3)));
 int     win_vasprintf(char **out, const char *fmt, va_list ap) __attribute__((format(gnu_printf, 2, 0)));
 
-/* Directory of emsg.exe, with '/' (themes are looked for there). */
+/* Directory of mcm.exe, with '/' (themes are looked for there). */
 const char *win_exe_dir(void);
 /* Run a command line (program and arguments, as typed) and wait for it;
  * returns its exit code, or -1 if it could not be started. */

@@ -11,7 +11,7 @@ volatile sig_atomic_t quit_requested;
 
 static void oom(void)
 {
-	fputs("emsg: out of memory\n", stderr);
+	fputs("mcm: out of memory\n", stderr);
 	abort();
 }
 

@@ -1,6 +1,6 @@
 /* mime.h - RFC 2047 header decoding and MIME message rendering */
-#ifndef EMSG_MIME_H
-#define EMSG_MIME_H
+#ifndef MCM_MIME_H
+#define MCM_MIME_H
 
 #include <stddef.h>
 #include <time.h>

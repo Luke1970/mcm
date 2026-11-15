@@ -5,8 +5,8 @@
  * extensions SMTPUTF8 (RFC 6531), 8BITMIME (RFC 6152), SIZE (RFC 1870)
  * and AUTH PLAIN / LOGIN (RFC 4954, RFC 4616).
  */
-#ifndef EMSG_SMTP_H
-#define EMSG_SMTP_H
+#ifndef MCM_SMTP_H
+#define MCM_SMTP_H
 
 #include <stddef.h>
 

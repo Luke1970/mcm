@@ -19,7 +19,7 @@ struct pop3 {
 	net_trust trust;
 };
 
-static void seterr(pop3_t *p, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 2, 3)));
+static void seterr(pop3_t *p, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 2, 3)));
 static void seterr(pop3_t *p, const char *fmt, ...)
 {
 	va_list ap;

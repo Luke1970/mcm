@@ -74,7 +74,7 @@ struct net {
 	char     err[512];
 };
 
-static void seterr(net_t *n, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 2, 3)));
+static void seterr(net_t *n, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 2, 3)));
 static void seterr(net_t *n, const char *fmt, ...)
 {
 	va_list ap;
@@ -260,7 +260,7 @@ int net_bytes(net_t *n, buf_t *b, size_t len)
 #ifdef _WIN32
 /* OpenSSL on Windows has no CA file of its own: trust the certificates in
  * the Windows "ROOT" store (Trusted Root Certification Authorities), and
- * cacert.pem next to emsg.exe if there is one. */
+ * cacert.pem next to mcm.exe if there is one. */
 static void add_windows_roots(SSL_CTX *ctx)
 {
 	X509_STORE *st = SSL_CTX_get_cert_store(ctx);

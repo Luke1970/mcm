@@ -10,12 +10,12 @@
  *
  * Salt (16 bytes) and nonce (12 bytes) are random for every value. The AAD
  * is authenticated, so a value only decrypts for the server it was stored
- * for: editing server= in the config file cannot make emsg send the
+ * for: editing server= in the config file cannot make mcm send the
  * password elsewhere. A wrong master password or any change to the value
  * makes decryption fail (the GCM tag does not match).
  */
-#ifndef EMSG_VAULT_H
-#define EMSG_VAULT_H
+#ifndef MCM_VAULT_H
+#define MCM_VAULT_H
 
 /* Encrypt; returns a malloc'd "enc1$..." string, or NULL on failure. */
 char *vault_encrypt(const char *master, const char *aad, const char *password);

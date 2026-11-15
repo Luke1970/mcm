@@ -4,8 +4,8 @@
  * verification (system CAs + host name) is passed to a callback that may
  * accept it anyway; nothing is sent over the connection before that decision.
  */
-#ifndef EMSG_NET_H
-#define EMSG_NET_H
+#ifndef MCM_NET_H
+#define MCM_NET_H
 
 #include <stddef.h>
 

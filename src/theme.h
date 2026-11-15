@@ -1,6 +1,6 @@
 /* theme.h - color themes loaded from NAME.theme files */
-#ifndef EMSG_THEME_H
-#define EMSG_THEME_H
+#ifndef MCM_THEME_H
+#define MCM_THEME_H
 
 #include <stddef.h>
 
@@ -20,7 +20,7 @@ typedef struct {
 void  theme_defaults(theme_t *t);
 /* Find NAME.theme in the usual places (or use NAME as a path). malloc'd or NULL. */
 char *theme_find(const char *name);
-/* The user's editable copy ~/.config/emsg/NAME.theme. Created when missing:
+/* The user's editable copy ~/.config/mcm/NAME.theme. Created when missing:
  * copied from the installed theme NAME, or the built-in colors for
  * "default". malloc'd path, or NULL (NAME is a path or unknown). */
 char *theme_user_file(const char *name, int *created);

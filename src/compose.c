@@ -83,7 +83,7 @@ typedef struct {
 	char err[200];
 } lex_t;
 
-static int lerr(lex_t *l, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 2, 3)));
+static int lerr(lex_t *l, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 2, 3)));
 static int lerr(lex_t *l, const char *fmt, ...)
 {
 	if (!*l->err) {
@@ -963,7 +963,7 @@ static field_t *find(field_t *f, int n, const char *name)
 	return NULL;
 }
 
-static int fail(compose_out *o, int line, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 3, 4)));
+static int fail(compose_out *o, int line, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 3, 4)));
 static int fail(compose_out *o, int line, const char *fmt, ...)
 {
 	va_list ap;
@@ -1072,7 +1072,7 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 	/* ---- check fields ---- */
 	for (int i = 0; i < nf; i++) {
 		if (in_list(GENERATED, f[i].name)) {
-			fail(out, f[i].line, "%s: is set by emsg; remove that line", f[i].name);
+			fail(out, f[i].line, "%s: is set by mcm; remove that line", f[i].name);
 			goto done;
 		}
 		if (in_list(UNIQUE, f[i].name))
@@ -1241,7 +1241,7 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 		unsigned char r[12];
 		if (RAND_bytes(r, (int)sizeof r) != 1)   /* never expected: then unique enough */
 			for (size_t i = 0; i < sizeof r; i++) r[i] = (unsigned char)(time(NULL) >> (8 * (i % 4)) ^ getpid() >> (i % 3) ^ i * 151);
-		int k = snprintf(boundary, sizeof boundary, "=_emsg_");
+		int k = snprintf(boundary, sizeof boundary, "=_mcm_");
 		for (size_t i = 0; i < sizeof r; i++) k += snprintf(boundary + k, sizeof boundary - (size_t)k, "%02x", r[i]);
 	}
 
@@ -1249,7 +1249,7 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 	const char *domain = "localhost";
 	if (sender->n && sender->e[0].n) domain = sender->e[0].m[0].domain;
 	else if (from->n && from->e[0].n) domain = from->e[0].m[0].domain;
-	if (!is_ascii(domain) || *domain == '[') domain = "emsg.invalid";
+	if (!is_ascii(domain) || *domain == '[') domain = "mcm.invalid";
 	buf_t mid = {0};
 	field_t *fmid = find(f, nf, "Message-ID");
 	if (fmid && *fmid->value) buf_adds(&mid, fmid->value);

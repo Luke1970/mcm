@@ -9,8 +9,8 @@
  * sessions, so callers identify messages by their UIDL and check
  * pop3_generation() to know when numbers must be looked up again.
  */
-#ifndef EMSG_POP3_H
-#define EMSG_POP3_H
+#ifndef MCM_POP3_H
+#define MCM_POP3_H
 
 #include <stddef.h>
 #include <stdint.h>

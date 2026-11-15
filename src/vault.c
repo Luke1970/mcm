@@ -26,7 +26,7 @@ void vault_free(char *s)
 	free(s);
 }
 
-#if defined(LIBRESSL_VERSION_NUMBER) || defined(EMSG_OWN_SCRYPT)
+#if defined(LIBRESSL_VERSION_NUMBER) || defined(MCM_OWN_SCRYPT)
 /* LibreSSL (OpenBSD) has no EVP_PBE_scrypt: scrypt as in RFC 7914, on top of
  * PBKDF2-HMAC-SHA256. Gives the same keys, so stored passwords move between
  * systems. */
@@ -120,7 +120,7 @@ static int derive(const char *master, const unsigned char *salt, int logn, int r
 	if (logn < 10 || logn > 20 || r < 1 || r > 32 || p < 1 || p > 4) return -1;
 	uint64_t n = (uint64_t)1 << logn;
 	uint64_t maxmem = 128 * n * (uint64_t)r * (uint64_t)p + (1u << 20) * 8;
-#if defined(LIBRESSL_VERSION_NUMBER) || defined(EMSG_OWN_SCRYPT)
+#if defined(LIBRESSL_VERSION_NUMBER) || defined(MCM_OWN_SCRYPT)
 	(void)maxmem;
 	return own_scrypt(master, strlen(master), salt, SALT_LEN, n, r, p, key, KEY_LEN);
 #else

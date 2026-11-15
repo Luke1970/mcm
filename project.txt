@@ -1,8 +1,8 @@
-emsg - requirements
-===================
+Mail Commander (mcm) - requirements
+===================================
 
 A console email client in C with ncurses, styled after PC Tools and Midnight
-Commander. This file lists everything needed to build emsg again from
+Commander. This file lists everything needed to build mcm again from
 scratch: what it does, how it looks, how it behaves and what it must never do.
 The README describes the same program for its users.
 
@@ -10,7 +10,16 @@ The README describes the same program for its users.
 1. General
 ----------
 
-- Written in C (C11, POSIX), one program called `emsg`.
+- Written in C (C11, POSIX), one program called `mcm`; its full name is
+  Mail Commander, used where there is room (--version, the Windows window
+  title, the README); mcm where space is needed (menu bar, command, paths).
+- Called emsg up to 0.94. At start, ~/.config/emsg and ~/.local/share/emsg
+  (Windows: %APPDATA%\emsg, %LOCALAPPDATA%\emsg) are renamed to mcm when
+  no mcm folder exists yet, emsg.conf to mcm.conf, account paths into the
+  old data folder are rewritten, and a POP3 folder's .emsg-pop3-state
+  becomes .mcm-pop3-state. The master password check keeps its old
+  additional data "emsg master password check" and plaintext "emsg", or
+  existing stored passwords could not be unlocked.
 - ncurses with wide characters (ncursesw) for windows, keys and mouse.
 - OpenSSL (1.1.1 or 3.x) or LibreSSL for TLS, random numbers and password
   encryption; iconv for character sets.
@@ -19,9 +28,9 @@ The README describes the same program for its users.
 - Fully usable from the keyboard; the mouse is optional.
 - Smallest supported terminal: 80 x 25.
 - Licence: GPLv3.
-- Version number in src/main.c (EMSG_VERSION). Every change request raises it
-  by 0.01 (0.9, 0.91, 0.92, ...). It is shown in the menu bar, by `emsg -V`, in the help texts
-  (@VERSION@) and in the User-Agent header (`emsg/VERSION`).
+- Version number in src/main.c (MCM_VERSION). Every change request raises it
+  by 0.01 (0.9, 0.91, 0.92, ...). It is shown in the menu bar, by `mcm -V`, in the help texts
+  (@VERSION@) and in the User-Agent header (`mcm/VERSION (Mail Commander)`).
 
 
 2. Security (never to be broken)
@@ -29,14 +38,14 @@ The README describes the same program for its users.
 
 - Nothing goes over the network unencrypted: IMAP only as IMAPS (TLS),
   POP3 as POP3S or with required STLS, SMTP with TLS or required STARTTLS.
-  If a server cannot encrypt, emsg refuses to log in or send.
+  If a server cannot encrypt, mcm refuses to log in or send.
 - TLS 1.2 or later. Server certificates are checked against the system's
   trusted certificates and the host name.
 - Passwords are never taken from the command line or a URL (a password in a
   URL is refused).
 - Passwords are stored only when the user chooses so, and only encrypted.
 - The master password and decrypted passwords live only in memory and are
-  overwritten when emsg exits. The master password is never stored.
+  overwritten when mcm exits. The master password is never stored.
 - Config file, certificate file and saved unsent text are mode 0600.
 - The MS-DOS version (planned) never stores passwords and keeps TLS session
   data in memory only (see 18).
@@ -57,29 +66,29 @@ The README describes the same program for its users.
 - Library flags can be overridden: CURSES_CFLAGS, CURSES_LIBS, SSL_CFLAGS,
   SSL_LIBS, ICONV_LIBS.
 - Targets: all, install, uninstall, clean, win, dos-bench.
-  `make install` puts emsg in $(PREFIX)/bin and the themes in
-  $(PREFIX)/share/emsg/themes; PREFIX defaults to /usr/local.
+  `make install` puts mcm in $(PREFIX)/bin and the themes in
+  $(PREFIX)/share/mcm/themes; PREFIX defaults to /usr/local.
 - Compatibility:
     ncurses before 6.1: init_extended_pair falls back to init_pair (256
       colors instead of 24-bit); no BUTTON5_PRESSED means no wheel down.
-    LibreSSL has no scrypt: emsg has its own scrypt (RFC 7914, on top of
+    LibreSSL has no scrypt: mcm has its own scrypt (RFC 7914, on top of
       PKCS5_PBKDF2_HMAC with SHA-256). It gives the same keys as OpenSSL's,
       so stored passwords can be moved between systems.
     Random numbers from RAND_bytes (no getrandom, rand or sprintf, which
       OpenBSD's linker warns about).
 - Windows 10/11 (`make win`): cross-compiled on Linux with MinGW-w64
-  (x86_64-w64-mingw32-gcc) into one static emsg.exe (-static: no DLLs but
+  (x86_64-w64-mingw32-gcc) into one static mcm.exe (-static: no DLLs but
   Windows' own). PDCurses 3.8 (wincon) is compiled from its source
   (PDCURSES=dir) into win/obj/libpdcurses.a with PDC_WIDE, PDC_FORCE_UTF8
-  and PDC_RGB, the same defines emsg uses (compat.h); a mismatch in PDC_RGB
+  and PDC_RGB, the same defines mcm uses (compat.h); a mismatch in PDC_RGB
   swaps red and blue. OpenSSL, zlib and win-iconv from the static mingw64
   packages (WIN_LIBDIR); also -lpathcch -lbcrypt -lcrypt32 -lws2_32.
-  Result in win/emsg/ (emsg.exe, themes/) and win/emsg.zip.
+  Result in win/mcm/ (mcm.exe, themes/) and win/mcm.zip.
   src/compat.h is included first in every file (gcc -include);
   src/win32.c holds the replacements:
     files binary (_fmode), console code page UTF-8, Winsock started;
     HOME = %USERPROFILE%, XDG_CONFIG_HOME = %APPDATA%,
-      XDG_DATA_HOME = %LOCALAPPDATA% when not set (so the rest of emsg uses
+      XDG_DATA_HOME = %LOCALAPPDATA% when not set (so the rest of mcm uses
       its normal paths);
     rename replaces an existing file (MoveFileEx), realpath (_fullpath, '/'),
     pread, getline, strcasestr, memmem, asprintf, a wcwidth of 1 (PDCurses
@@ -90,18 +99,18 @@ The README describes the same program for its users.
   ones arrive as two UTF-16 halves and are joined (utf16_join) before they
   are stored as UTF-8. 256 colors: PDC_set_blink(FALSE) after start_color
   puts the console in VT mode.
-  win/emsg.manifest (resource win/emsg.rc): active code page UTF-8, so file
+  win/mcm.manifest (resource win/mcm.rc): active code page UTF-8, so file
   names in the ANSI calls are UTF-8, and long paths.
   net.c: Winsock (closesocket, millisecond timeouts, FormatMessage errors);
   the CA certificates come from the Windows ROOT store plus cacert.pem next
-  to emsg.exe. ui.c: raw mode (Ctrl-C/Q/S are keys; Ctrl-C quits at the
+  to mcm.exe. ui.c: raw mode (Ctrl-C/Q/S are keys; Ctrl-C quits at the
   next key read), keypad Enter / + - * / as characters, resize_term after
   KEY_RESIZE, CTL_LEFT/CTL_RIGHT for word moves. Maildir names end in
   "!2,FLAGS" instead of ":2,FLAGS". Paths like C:\Mail on the command line.
 - Help texts are plain text files in help/, turned into src/helptext.h by
   tools/txt2c.awk at build time. Lines starting with '#' are comments;
   @VERSION@ becomes the version:
-    help/cmdline.txt  emsg --help / -h
+    help/cmdline.txt  mcm --help / -h
     help/usage.txt    after a wrong option
     help/keys.txt     the F1 help window
     help/editor.txt   the editor's key line (one line)
@@ -112,14 +121,14 @@ The README describes the same program for its users.
 4. Command line
 ---------------
 
-  emsg                      the only account, or choose one from a list
-  emsg [options] [WHERE]
+  mcm                      the only account, or choose one from a list
+  mcm [options] [WHERE]
 
   -a NAME   use account NAME (a new one if unknown)
   -n        set up a new account (asks: IMAP, POP3 or local mail)
   -f WHERE  where the mail is (same as WHERE on its own)
   -s SERVER -p PORT -u USER
-  -t THEME  theme name (~/.config/emsg/NAME.theme) or a path to a file
+  -t THEME  theme name (~/.config/mcm/NAME.theme) or a path to a file
   -V, --version
   -h, --help
 
@@ -137,7 +146,7 @@ WHERE:
 5. Configuration files
 ----------------------
 
-~/.config/emsg/emsg.conf (mode 0600), key = value, one [account NAME]
+~/.config/mcm/mcm.conf (mode 0600), key = value, one [account NAME]
 section per account:
 
   theme = default
@@ -145,7 +154,7 @@ section per account:
   folders_width = 25         percent of the screen
   list_width = 45            percent (with three columns: of what is left)
   last_account = Work
-  master_check = enc1$...    the word "emsg" encrypted with the master password
+  master_check = enc1$...    the word "mcm" encrypted with the master password
 
   [account Work]
   type = imap | pop3 | local
@@ -154,11 +163,11 @@ section per account:
   smtp_password, store_password = yes | no (no = do not ask again;
   absent = ask), password = enc1$...
 
-- A config from emsg 0.3 (no sections) is read as one account.
-- ~/.config/emsg/certs: always-accepted certificates, `host port sha256`.
-- ~/.config/emsg/NAME.theme: color themes (see 13).
-- ~/.local/share/emsg/ACCOUNT/: local Sent/Drafts of POP3 accounts.
-- ~/.local/share/emsg/unsent-DATE.txt: text saved on Ctrl-Q / Ctrl-C.
+- A config from emsg 0.3 (the old name; no sections) is read as one account.
+- ~/.config/mcm/certs: always-accepted certificates, `host port sha256`.
+- ~/.config/mcm/NAME.theme: color themes (see 13).
+- ~/.local/share/mcm/ACCOUNT/: local Sent/Drafts of POP3 accounts.
+- ~/.local/share/mcm/unsent-DATE.txt: text saved on Ctrl-Q / Ctrl-C.
 
 
 6. Accounts and login
@@ -171,7 +180,7 @@ section per account:
   path; default path is the first of ~/Maildir, ~/Mail, ~/mail, $MAIL.
 - A (Account) lists the accounts; the current one is marked *. Enter on it
   changes name, full name and stored password; Enter on another one or on
-  "New account" restarts emsg with that account.
+  "New account" restarts mcm with that account.
 - On startup INBOX is opened and the newest message is shown.
 
 
@@ -179,10 +188,10 @@ section per account:
 ---------------
 
 - When the check fails (self-signed, expired, wrong name, unknown issuer)
-  emsg shows subject, issuer, validity, the problem and the SHA-256
+  mcm shows subject, issuer, validity, the problem and the SHA-256
   fingerprint, with three buttons: Reject, Accept once (this session),
-  Always accept (saved in ~/.config/emsg/certs).
-- If a server with a saved certificate shows a different one, emsg warns
+  Always accept (saved in ~/.config/mcm/certs).
+- If a server with a saved certificate shows a different one, mcm warns
   that it has changed.
 - Automatic reconnects accept only the certificate accepted at login.
 
@@ -193,14 +202,14 @@ section per account:
 - After the first successful login: Store encrypted / Not now (ask next
   time, the default) / Don't ask again.
 - A master password is chosen once: typed twice, at least 8 characters.
-  After that emsg asks for the master password at start instead of the
+  After that mcm asks for the master password at start instead of the
   account password; Esc skips it and shows the normal login.
 - Key: scrypt(master, salt, N = 2^16, r = 8, p = 1) -> 256 bits; salt of 16
   random bytes, new for every stored value.
 - Encryption: AES-256-GCM, random 12-byte nonce, 16-byte tag. The text
   "imap USER@SERVER" (or "smtp USER@SERVER") is the additional data, so a
   stored password does not decrypt when the server in the config is changed;
-  emsg then says so and asks for the password.
+  mcm then says so and asks for the password.
 - Format: enc1$LOG2N$R$P$SALT$NONCE$CIPHERTEXT+TAG (base64 parts).
 - master_check makes a wrong master password known at once.
 - C -> Delete all stored passwords removes them from every account together
@@ -228,8 +237,8 @@ POP3 (src/pop3.c):
 - USER/PASS, LIST, UIDL, TOP for list headers, RETR when a message is
   opened. Nothing is ever deleted on the server.
 - One INBOX from the server; Sent, Drafts and other folders are local
-  Maildirs in ~/.local/share/emsg/NAME/ (or path =), made when first used.
-- Seen/answered kept per UIDL in .emsg-pop3-state; ids no longer on the
+  Maildirs in ~/.local/share/mcm/NAME/ (or path =), made when first used.
+- Seen/answered kept per UIDL in .mcm-pop3-state; ids no longer on the
   server are forgotten.
 - A new session on F5 and every 5 minutes (a POP3 session only sees the
   mailbox as it was at login); kept alive in between.
@@ -253,7 +262,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  emsg 0.94 Quit Mail Reply Forward heX Header Account Config F1=Help  date time
+  mcm 0.95 Quit Mail Reply Forward heX Header Account Config F1=Help  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -326,9 +335,9 @@ Alt-Space or Backspace there.
 Ctrl-Q and Ctrl-C (either case) always quit, also in dialogs, the help, the
 file picker and the editor, without questions:
 - connections are closed without waiting for the server;
-- a message being written is saved as ~/.local/share/emsg/unsent-DATE.txt
+- a message being written is saved as ~/.local/share/mcm/unsent-DATE.txt
   (mode 0600) and its path is printed;
-- XON/XOFF flow control is switched off while emsg runs (so Ctrl-Q and
+- XON/XOFF flow control is switched off while mcm runs (so Ctrl-Q and
   Ctrl-S arrive) and restored at exit;
 - Ctrl-C is a signal: it also stops a network wait (connect, TLS, a slow
   server). A second Ctrl-C leaves at once, restoring only the terminal;
@@ -355,9 +364,9 @@ file picker and the editor, without questions:
 13. Themes
 ----------
 
-- File ~/.config/emsg/NAME.theme, read at every start; NAME from -t or
+- File ~/.config/mcm/NAME.theme, read at every start; NAME from -t or
   theme = (default "default"). If missing it is created from
-  ./themes/NAME.theme, $(PREFIX)/share/emsg/themes/NAME.theme, or the
+  ./themes/NAME.theme, $(PREFIX)/share/mcm/themes/NAME.theme, or the
   built-in default colors.
 - Keys: BACKGROUND, TEXT, HIGHLIGHTBG, HIGHLIGHTTXT, MENUBG, MENUTXT,
   HOTKEY.
@@ -367,7 +376,7 @@ file picker and the editor, without questions:
 - 24-bit color where the terminal has it; otherwise the nearest of 256
   colors (darkblue -> 17). With TERM=xterm-256color and
   COLORTERM=truecolor/24bit the xterm-direct description is used, unless
-  EMSG_NO_DIRECT=1.
+  MCM_NO_DIRECT=1.
 - Shipped: default (PC Tools: white on dark blue, cyan bar, light gray
   menu, orange hotkeys), mc, dark, mono.
 
@@ -434,7 +443,7 @@ file picker and the editor, without questions:
 15. Memory and speed
 --------------------
 
-emsg keeps only what is on screen, so folder and message size do not limit
+mcm keeps only what is on screen, so folder and message size do not limit
 it (tested with a folder of 250,000 messages):
 - Email list: headers fetched in blocks of 100 around the visible rows, at
   most 64 blocks kept, least recently used dropped first. Opening a folder
@@ -520,10 +529,10 @@ line):
 - Message-ID, In-Reply-To, References: <left@right>.
 - Subject may be empty (the confirmation mentions it).
 - Each header only once; MIME-Version, Content-* and User-Agent are set by
-  emsg; other headers are passed on.
+  mcm; other headers are passed on.
 
 The message that goes out:
-- Date, Message-ID (random, at the From domain) and User-Agent: emsg/VER.
+- Date, Message-ID (random, at the From domain) and User-Agent: mcm/VER.
 - Bcc left out of the sent header, kept in the Sent copy.
 - Headers folded at 78, never over 998 characters.
 - Non-ASCII names and subjects as RFC 2047 encoded words; a non-ASCII
@@ -553,7 +562,7 @@ The message that goes out:
   timeouts. If one recipient is refused nothing is sent and that address is
   shown. Certificates checked as for IMAP.
 - Local accounts send with their SMTP settings; without a stored password
-  emsg asks for one.
+  mcm asks for one.
 
 
 18. MS-DOS (planned) and the benchmark

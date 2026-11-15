@@ -75,7 +75,7 @@ int ui_get_wch(wint_t *wc)
 
 #ifndef _WIN32
 
-/* The terminal settings from before emsg started (for a second Ctrl-C). */
+/* The terminal settings from before mcm started (for a second Ctrl-C). */
 static struct termios shell_tio;
 static int have_shell_tio;
 
@@ -119,7 +119,7 @@ void ui_init(const theme_t *t)
 {
 	initscr();
 	raw();                    /* Ctrl-C, Ctrl-Q and Ctrl-S are keys */
-	PDC_set_title("emsg");
+	PDC_set_title("Mail Commander");
 	PDC_return_key_modifiers(FALSE);
 	noecho();
 	keypad(stdscr, TRUE);
@@ -160,7 +160,8 @@ static int ext_key(const char *cap, const char *seq, int code)
 static void start_curses(void)
 {
 	const char *term = getenv("TERM"), *ct = getenv("COLORTERM");
-	if (term && ct && !getenv("EMSG_NO_DIRECT") && !strcmp(term, "xterm-256color") &&
+	if (term && ct && !getenv("MCM_NO_DIRECT") && !getenv("EMSG_NO_DIRECT") &&
+	    !strcmp(term, "xterm-256color") &&
 	    (!strcmp(ct, "truecolor") || !strcmp(ct, "24bit"))) {
 		if (newterm("xterm-direct", stdout, stdin)) return;   /* NULL: not installed */
 	}

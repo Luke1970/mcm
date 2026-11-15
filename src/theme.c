@@ -31,10 +31,10 @@
 
 #ifdef _WIN32
 #undef DATADIR
-#define DATADIR win_exe_dir()          /* themes\ next to emsg.exe */
+#define DATADIR win_exe_dir()          /* themes\ next to mcm.exe */
 #endif
 #ifndef DATADIR
-#define DATADIR "/usr/local/share/emsg"
+#define DATADIR "/usr/local/share/mcm"
 #endif
 
 void theme_defaults(theme_t *t)
@@ -161,10 +161,10 @@ char *theme_find(const char *name)
 		return readable(name) ? xstrdup(name) : NULL;
 
 	if (xdg && *xdg) {
-		snprintf(p, sizeof p, "%s/emsg/%s.theme", xdg, name);
+		snprintf(p, sizeof p, "%s/mcm/%s.theme", xdg, name);
 		if (readable(p)) return xstrdup(p);
 	} else if (home) {
-		snprintf(p, sizeof p, "%s/.config/emsg/%s.theme", home, name);
+		snprintf(p, sizeof p, "%s/.config/mcm/%s.theme", home, name);
 		if (readable(p)) return xstrdup(p);
 	}
 	snprintf(p, sizeof p, "themes/%s.theme", name);
@@ -175,8 +175,8 @@ char *theme_find(const char *name)
 }
 
 static const char DEFAULT_TEXT[] =
-	"# emsg color theme. emsg reads this file every time it starts:\n"
-	"# change a color here and start emsg again.\n"
+	"# mcm color theme. mcm reads this file every time it starts:\n"
+	"# change a color here and start mcm again.\n"
 	"#\n"
 	"# Colors: black red green yellow blue magenta cyan white,\n"
 	"#         optional \"bright\"/\"light\" prefix, gray, darkgray, darkblue, navy,\n"
@@ -211,11 +211,11 @@ char *theme_user_file(const char *name, int *created)
 		return NULL;
 	const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
 	char dir[900], p[1024];
-	if (xdg && *xdg) snprintf(dir, sizeof dir, "%s/emsg", xdg);
+	if (xdg && *xdg) snprintf(dir, sizeof dir, "%s/mcm", xdg);
 	else if (home) {
 		snprintf(dir, sizeof dir, "%s/.config", home);
 		mkdir(dir, 0700);
-		snprintf(dir, sizeof dir, "%s/.config/emsg", home);
+		snprintf(dir, sizeof dir, "%s/.config/mcm", home);
 	} else return NULL;
 	snprintf(p, sizeof p, "%s/%s.theme", dir, name);
 	if (readable(p)) return xstrdup(p);

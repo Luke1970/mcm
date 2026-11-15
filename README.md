@@ -1,6 +1,12 @@
-# emsg
+# Mail Commander (mcm)
 
-A console email client in C/ncurses, styled after PC Tools and Midnight Commander.
+A console email client in C/ncurses, styled after PC Tools and Midnight
+Commander. The program is called `mcm`.
+
+Up to version 0.94 it was called **emsg**. At its first start mcm renames
+the old settings folders (`~/.config/emsg` and `~/.local/share/emsg`, on
+Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
+`emsg.conf` to `mcm.conf`; accounts and stored passwords keep working.
 
 ```
  Quit   Mail   Reply   Forward   heX   Header   Account   Config   F1=Help  Thu 12 Nov 2026
@@ -13,9 +19,25 @@ A console email client in C/ncurses, styled after PC Tools and Midnight Commande
  test@localhost  F1 Help  Tab Folders/Emails  ←→ Column  Enter Open  L Filter  F5 Refresh
 ```
 
+Features:
+
+- **IMAPS, POP3S and local mail** (Maildir, mbox, MH); several accounts;
+  never sends a password or mail unencrypted.
+- **Fast on huge folders**: only what is on screen is fetched, so a folder of
+  250,000 messages opens at once; a filter searches on the server.
+- **HTML and Markdown** mail shown as readable text; hex view of the raw
+  message.
+- **A vim-like editor** for new mail, replies and forwards, with
+  format=flowed, attachments and header checks before sending over SMTP.
+- **Stored passwords** only if you want, encrypted with a master password
+  (scrypt + AES-256-GCM).
+- Keyboard first, mouse optional; color themes.
+- Runs on **Linux, FreeBSD, OpenBSD, NetBSD and Windows 10/11**; an MS-DOS
+  version is being studied.
+
 ## Build
 
-What emsg needs on every system:
+What mcm needs on every system:
 
 - **GNU make** (`make` on Linux, `gmake` on the BSDs), a C compiler (GCC or
   Clang), `pkg-config` and `awk`;
@@ -26,8 +48,8 @@ What emsg needs on every system:
   OpenBSD.
 
 `make` finds the libraries with `pkg-config` and knows where each BSD keeps
-its packages. `make install` puts `emsg` in `$(PREFIX)/bin` and the themes
-in `$(PREFIX)/share/emsg/themes` (`PREFIX` is `/usr/local` unless you give
+its packages. `make install` puts `mcm` in `$(PREFIX)/bin` and the themes
+in `$(PREFIX)/share/mcm/themes` (`PREFIX` is `/usr/local` unless you give
 another one, e.g. `make install PREFIX=$HOME/.local`); `make uninstall`
 removes them. Library flags can be overridden, e.g.
 `make CURSES_LIBS="-lncursesw -ltinfo"`.
@@ -41,7 +63,7 @@ removes them. Library flags can be overridden, e.g.
 | Arch, Manjaro | `sudo pacman -S --needed base-devel ncurses openssl` |
 | openSUSE | `sudo zypper install gcc make pkg-config ncurses-devel libopenssl-devel` |
 
-Then, in the emsg directory:
+Then, in the mcm directory:
 
 ```sh
 make
@@ -57,7 +79,7 @@ pkg-config come from packages (in `/usr/local`). As root:
 pkg install gmake pkgconf ncurses
 ```
 
-Then, in the emsg directory:
+Then, in the mcm directory:
 
 ```sh
 gmake
@@ -67,7 +89,7 @@ su root -c 'gmake install'
 ### OpenBSD
 
 ncurses and LibreSSL are part of the base system; GNU make and iconv come
-from packages. LibreSSL has no scrypt, so emsg uses its own; it gives the same
+from packages. LibreSSL has no scrypt, so mcm uses its own; it gives the same
 keys as OpenSSL's, so stored passwords stay readable on other systems.
 Tested on OpenBSD 8.0 (amd64): build, install, IMAPS login, certificate
 check, stored passwords and the keys. As root:
@@ -76,7 +98,7 @@ check, stored passwords and the keys. As root:
 pkg_add gmake libiconv
 ```
 
-Then, in the emsg directory:
+Then, in the mcm directory:
 
 ```sh
 gmake
@@ -86,14 +108,14 @@ doas gmake install
 ### NetBSD
 
 OpenSSL and iconv are part of the base system. NetBSD's own curses has no
-mouse support or extended colors, so emsg uses ncursesw from pkgsrc (in
+mouse support or extended colors, so mcm uses ncursesw from pkgsrc (in
 `/usr/pkg`). As root:
 
 ```sh
 pkgin install gmake pkgconf ncursesw
 ```
 
-Then, in the emsg directory:
+Then, in the mcm directory:
 
 ```sh
 gmake
@@ -107,9 +129,9 @@ shown above.
 ### Windows 10 and 11
 
 The Windows version is cross-compiled on Linux with MinGW-w64 into one
-`emsg.exe` with everything built in: PDCurses (instead of ncurses), OpenSSL,
+`mcm.exe` with everything built in: PDCurses (instead of ncurses), OpenSSL,
 zlib and win-iconv. PDCurses is compiled from its source with the same
-settings as emsg. On Fedora:
+settings as mcm. On Fedora:
 
 ```sh
 sudo dnf install mingw64-gcc mingw64-openssl-static mingw64-zlib-static mingw64-win-iconv-static
@@ -118,13 +140,13 @@ tar -xzf 3.8.tar.gz
 make win PDCURSES=PDCurses-3.8
 ```
 
-The result is the folder `win/emsg/` with `emsg.exe` and `themes\`, also
-packed as `win/emsg.zip` when `zip` is installed. How to install and use it:
+The result is the folder `win/mcm/` with `mcm.exe` and `themes\`, also
+packed as `win/mcm.zip` when `zip` is installed. How to install and use it:
 see [Windows](#windows).
 
 ### MS-DOS
 
-emsg itself does not run on MS-DOS yet (see [MS-DOS](#ms-dos-planned)). What
+mcm itself does not run on MS-DOS yet (see [MS-DOS](#ms-dos-planned)). What
 builds is the TLS benchmark in `dos/`, which measures BearSSL on a real or
 emulated PC:
 
@@ -140,7 +162,7 @@ They are cross-compiled on Linux with:
 - **BearSSL 0.6** - <https://bearssl.org/>, file `bearssl-0.6.tar.gz`, patched
   with `dos/bearssl-0.6-16bit.patch` (two changes that 16-bit compilers need).
 
-Download, unpack and patch (here in `~/dos`), then build from the emsg directory:
+Download, unpack and patch (here in `~/dos`), then build from the mcm directory:
 
 ```sh
 mkdir -p ~/dos/watcom && cd ~/dos
@@ -148,8 +170,8 @@ curl -LO https://github.com/open-watcom/open-watcom-v2/releases/download/Current
 tar -xJf ow-snapshot.tar.xz -C watcom
 curl -LO https://bearssl.org/bearssl-0.6.tar.gz
 tar -xzf bearssl-0.6.tar.gz
-cd bearssl-0.6 && patch -p1 < /path/to/emsg/dos/bearssl-0.6-16bit.patch
-cd /path/to/emsg
+cd bearssl-0.6 && patch -p1 < /path/to/mcm/dos/bearssl-0.6-16bit.patch
+cd /path/to/mcm
 make dos-bench WATCOM=$HOME/dos/watcom BEARSSL=$HOME/dos/bearssl-0.6
 ```
 
@@ -163,9 +185,9 @@ The help texts are plain text files in `help/`; edit them and run `make`:
 
 | File | Shown |
 |---|---|
-| `help/cmdline.txt` | `emsg --help` / `emsg -h` |
+| `help/cmdline.txt` | `mcm --help` / `mcm -h` |
 | `help/usage.txt` | after a wrong command line option |
-| `help/keys.txt` | the Help window, F1 or ? in emsg |
+| `help/keys.txt` | the Help window, F1 or ? in mcm |
 | `help/editor.txt` | the key line at the bottom of the editor (one line) |
 
 Lines starting with `#` are comments, `@VERSION@` becomes the version number.
@@ -174,29 +196,29 @@ The build turns the files into `src/helptext.h` (with `tools/txt2c.awk`).
 ## Usage
 
 ```
-emsg [-a account | -n] [-s server] [-p port] [-u user] [-t theme] [-f URL]
-emsg [options] URL
-emsg -h | --help
+mcm [-a account | -n] [-s server] [-p port] [-u user] [-t theme] [-f URL]
+mcm [options] URL
+mcm -h | --help
 ```
 
-`emsg --help` explains the options and every kind of mail (IMAP, POP3, Maildir,
+`mcm --help` explains the options and every kind of mail (IMAP, POP3, Maildir,
 mbox, MH, a directory of folders) with examples.
 
 `-a NAME` starts with that account (a new one if the name is unknown), `-n`
 sets up a new account. A server/user from the command line or URL picks the
 account with that user and server, or makes a new one. Without any of these,
-emsg uses the only account, or lets you choose when there are several.
+mcm uses the only account, or lets you choose when there are several.
 
 Where the mail is can also be given as one URL, after `-f` or on its own:
 
 ```sh
-emsg -f imaps://me@example.com@imap.example.com
-emsg imaps://me@imap.example.com:993/Archive/2025
-emsg pop3s://me@pop.example.com
-emsg ~/Maildir
-emsg -f mbox:/var/spool/mail/me
-emsg ~/Mail/inbox             # an MH folder
-emsg ~/Mail                   # a directory of folders
+mcm -f imaps://me@example.com@imap.example.com
+mcm imaps://me@imap.example.com:993/Archive/2025
+mcm pop3s://me@pop.example.com
+mcm ~/Maildir
+mcm -f mbox:/var/spool/mail/me
+mcm ~/Mail/inbox             # an MH folder
+mcm ~/Mail                   # a directory of folders
 ```
 
 The user may be an e-mail address (the last `@` ends it; `%40` also works).
@@ -220,26 +242,26 @@ When the password of the account is stored (see below), only the master
 password is asked.
 
 The server certificate is checked against the system's trusted certificates and
-the server name. If that fails (self-signed, expired, wrong name, ...) emsg shows
+the server name. If that fails (self-signed, expired, wrong name, ...) mcm shows
 the certificate's details and SHA-256 fingerprint and lets you **Reject** it,
 **Accept once** (this session) or **Always accept** it. Always-accepted
-certificates are stored as `host port fingerprint` in `~/.config/emsg/certs`;
-if such a server later presents a different certificate, emsg warns that it has
+certificates are stored as `host port fingerprint` in `~/.config/mcm/certs`;
+if such a server later presents a different certificate, mcm warns that it has
 changed. Automatic reconnects only accept the certificate accepted at login.
 
 ### POP3
 
 POP3 only knows one mailbox, so a POP3 account shows the server's INBOX next to
-local folders: Sent and Drafts are Maildirs in `~/.local/share/emsg/NAME/`
+local folders: Sent and Drafts are Maildirs in `~/.local/share/mcm/NAME/`
 (`path =` in the account to put them elsewhere), created when first used.
 
 - **Encryption:** port 995 (and any port other than 110) uses TLS from the
   start. Port 110, or a server that greets in plain text, must offer **STLS**;
-  emsg refuses to log in otherwise, so the password never goes unencrypted.
-- **Seen and answered:** POP3 has no flags, so emsg keeps them per message
-  (by its UIDL, the server's unique id) in `.emsg-pop3-state` in the local
+  mcm refuses to log in otherwise, so the password never goes unencrypted.
+- **Seen and answered:** POP3 has no flags, so mcm keeps them per message
+  (by its UIDL, the server's unique id) in `.mcm-pop3-state` in the local
   folder directory. Messages no longer on the server are forgotten there.
-- **New mail:** a POP3 session only sees the mailbox as it was at login. emsg
+- **New mail:** a POP3 session only sees the mailbox as it was at login. mcm
   starts a new session on **F5** and otherwise every 5 minutes; in between it
   keeps the session alive.
 - Headers for the list are read with TOP; a message is downloaded whole (RETR)
@@ -266,18 +288,18 @@ Flags: in a **Maildir** they are kept in the file names (S seen, R answered,
 F flagged, T deleted), and reading a message moves it from `new/` to `cur/`, as
 other mail programs expect. **MH** keeps them in the `unseen`, `replied` and
 `flagged` sequences of `.mh_sequences` (rewritten as a new file; other sequences
-such as `cur` are kept), and a saved message gets the next free number. An **mbox** file is only read and appended to
-(with `fcntl` locking and mboxrd `>From ` quoting): its `Status`/`X-Status`
-headers give the flags, and messages read in emsg count as seen until it exits.
+such as `cur` are kept), and a saved message gets the next free number. An
+**mbox** file is only read and appended to (with `fcntl` locking and mboxrd
+`>From ` quoting): its `Status`/`X-Status` headers give the flags, and messages read in mcm count as seen until it exits.
 Changes by other programs (new mail delivered, messages removed) are picked up
 on F5 and every minute.
 
 Sending from a local account uses its SMTP settings (**C** → SMTP); without
-a password there, emsg asks for one when sending.
+a password there, mcm asks for one when sending.
 
 ### Accounts
 
-Every account is kept in `~/.config/emsg/emsg.conf` (mode 0600) in its own
+Every account is kept in `~/.config/mcm/mcm.conf` (mode 0600) in its own
 section:
 
 ```
@@ -306,7 +328,7 @@ type = pop3
 server = pop.example.net
 port = 995
 user = me@example.net
-path = /home/me/.local/share/emsg/Home
+path = /home/me/.local/share/mcm/Home
 
 [account Archive]
 type = local
@@ -319,18 +341,18 @@ path = ~/Mail
 The full name goes into From: as `Jörg Tester <joerg@example.org>`; it is quoted
 or RFC 2047 encoded when needed. **A** (Account) lists the accounts: Enter on the
 current one (marked `*`) changes its name, full name and stored password; Enter
-on another one, or on *New account*, restarts emsg with that account. A config
-file from emsg 0.3 (without sections) is read as one account.
+on another one, or on *New account*, restarts mcm with that account. A config
+file from emsg 0.3 (the old name, without sections) is read as one account.
 
 ### Stored passwords
 
-After the first successful login emsg asks whether to store the password:
+After the first successful login mcm asks whether to store the password:
 **Store encrypted**, **Not now** (ask next time) or **Don't ask again**. A stored
 password is encrypted with a *master password* that you choose once (typed
-twice, at least 8 characters). After that, emsg asks for the master password at
+twice, at least 8 characters). After that, mcm asks for the master password at
 start instead of the account password; Esc skips it and shows the normal login.
 The master password and the decrypted passwords are only kept in memory and
-are overwritten when emsg exits. **A** can store or forget the password later;
+are overwritten when mcm exits. **A** can store or forget the password later;
 **C** (Config) → *Delete all stored passwords* removes them from every account,
 together with the master password check, so you can choose a new master password.
 An SMTP password typed under **C** → *Outgoing mail* is stored the same way when the account
@@ -348,24 +370,27 @@ How a password is encrypted (`src/vault.c`, OpenSSL):
 3. **Bound to the account:** the text `imap USER@SERVER` (or `smtp USER@SERVER`)
    is authenticated with it (GCM additional data). If someone changes
    `server =` in the config file, the stored password no longer decrypts, so it
-   cannot be sent to another server: emsg says so and asks for the password.
+   cannot be sent to another server: mcm says so and asks for the password.
 4. **Stored as** `enc1$16$8$1$SALT$NONCE$CIPHERTEXT+TAG` (base64): version,
    scrypt parameters (log2 N, r, p), salt, nonce, and the encrypted password
    with its 16-byte GCM tag.
-5. **Checking the master password:** `master_check` holds the word `emsg`
+5. **Checking the master password:** `master_check` holds the word `mcm`
    encrypted the same way, so a wrong master password is reported at once.
 
 The protection is as strong as the master password: someone with a copy of
-`emsg.conf` can try master passwords offline, each try costing the scrypt work.
+`mcm.conf` can try master passwords offline, each try costing the scrypt work.
 Use a long one. The master password itself is never stored.
+
+### Screen and keys
 
 There are three windows: **Folders**, the **email list** and the **message**.
 
 - **Up to 150 columns** two are shown: on the left the email list *or* the
   folders, on the right always the message. **Tab** switches the left window
-  (its bottom border says `TAB=Folders`, left of `PgUp/PgDn`, or `TAB=Emails`). Opening a folder
-  (Enter) brings the email list back. The folder window's bottom border shows
-  `Enter=Select` (and `TAB=Emails` when the window is wide enough).
+  (its bottom border says `TAB=Folders`, left of `PgUp/PgDn`, or
+  `TAB=Emails`). Opening a folder (Enter) brings the email list back. The
+  folder window's bottom border shows `Enter=Select` (and `TAB=Emails` when
+  the window is wide enough).
 - **More than 150 columns** all three are shown side by side:
   Folders | List | Message. Tab is not needed then and does nothing.
 
@@ -376,8 +401,8 @@ The widths can be changed: **Ctrl-←** / **Ctrl-→** move the border on the le
 the message (with three columns: next to the folders when they have focus), or
 drag a border with the mouse (the one between list and message is marked `<>`):
 it follows the mouse while the button is held. (Only during such a drag does
-emsg ask the terminal for mouse movement, xterm mode 1002; otherwise it
-receives clicks only.) The widths are kept in `emsg.conf` as percentages, so
+mcm ask the terminal for mouse movement, xterm mode 1002; otherwise it
+receives clicks only.) The widths are kept in `mcm.conf` as percentages, so
 they also fit after the terminal is resized: `folders_width` is the folder
 window's share of the screen, `list_width` the email list's share of the
 screen (with three columns: of what the folders leave).
@@ -406,6 +431,33 @@ screen (with three columns: of what the folders leave).
 
 The bottom border of the list and the message window shows their paging keys.
 
+A long message has a scroll bar in the right border of the message window: click
+▲ or ▼ to scroll a line, click the track above or below the thumb (█) to scroll a
+page, or drag the thumb. The mouse wheel over the message window scrolls it
+three lines at a time, and over the email or folder list it scrolls that list:
+the selected email stays open, and the next key (or click) brings the list
+back to the selection. A click on an email or folder selects it (and gives that window
+the focus); a double click opens it, like Enter.
+Many terminals (GNOME Terminal, Konsole, tmux, the Linux text console) send the
+same code for Shift-Space as for Space, so there Shift-Space pages *down*; use
+Ctrl-Space, Alt-Space or Backspace to page up. Terminals that report
+Shift-Space separately (kitty, or xterm with `modifyOtherKeys`) page up.
+
+**Ctrl-Q and Ctrl-C always quit** (lower or upper case is the same key),
+wherever you are (main screen, dialogs, help, file picker, editor), without
+questions: connections are closed without waiting for the server, and a message
+you were writing is saved as a text file (`~/.local/share/mcm/unsent-DATE.txt`,
+mode 0600, its path is printed).
+
+- **Ctrl-Q** is read as a key: mcm switches the terminal's XON/XOFF flow control
+  off while it runs (so Ctrl-Q and Ctrl-S reach it) and restores it at exit.
+- **Ctrl-C** arrives as a signal, so it also works while mcm waits for the
+  network (connecting, TLS, a slow server): the wait stops and mcm quits. If
+  that does not happen, a **second Ctrl-C** leaves immediately: the terminal is
+  restored, but nothing is saved.
+- While `:e` runs your own editor, Ctrl-C belongs to that editor.
+- On Windows, Ctrl-C is read as a key like Ctrl-Q (see [Windows](#windows)).
+
 ### Filter
 
 **L** (fi**L**ter, shown in the email list's bottom border) opens a filter bar in
@@ -424,35 +476,9 @@ another folder ends it too.
   `CHARSET UTF-8` for non-ASCII text), so a large folder is filtered without
   downloading it. Only the headers of the matches on screen are fetched, as
   usual.
-- **POP3 and local folders:** emsg reads the headers of the folder (for POP3
+- **POP3 and local folders:** mcm reads the headers of the folder (for POP3
   with TOP, which takes a while on a large mailbox).
 - New mail and deleted messages update the filtered list.
-
-A long message has a scroll bar in the right border of the message window: click
-▲ or ▼ to scroll a line, click the track above or below the thumb (█) to scroll a
-page, or drag the thumb. The mouse wheel over the message window scrolls it
-three lines at a time, and over the email or folder list it scrolls that list:
-the selected email stays open, and the next key (or click) brings the list
-back to the selection. A click on an email or folder selects it (and gives that window
-the focus); a double click opens it, like Enter.
-Many terminals (GNOME Terminal, Konsole, tmux, the Linux text console) send the
-same code for Shift-Space as for Space, so there Shift-Space pages *down*; use
-Ctrl-Space, Alt-Space or Backspace to page up. Terminals that report
-Shift-Space separately (kitty, or xterm with `modifyOtherKeys`) page up.
-
-**Ctrl-Q and Ctrl-C always quit** (lower or upper case is the same key),
-wherever you are (main screen, dialogs, help, file picker, editor), without
-questions: connections are closed without waiting for the server, and a message
-you were writing is saved as a text file (`~/.local/share/emsg/unsent-DATE.txt`,
-mode 0600, its path is printed).
-
-- **Ctrl-Q** is read as a key: emsg switches the terminal's XON/XOFF flow control
-  off while it runs (so Ctrl-Q and Ctrl-S reach it) and restores it at exit.
-- **Ctrl-C** arrives as a signal, so it also works while emsg waits for the
-  network (connecting, TLS, a slow server): the wait stops and emsg quits. If
-  that does not happen, a **second Ctrl-C** leaves immediately: the terminal is
-  restored, but nothing is saved.
-- While `:e` runs your own editor, Ctrl-C belongs to that editor.
 
 ## Writing mail
 
@@ -468,43 +494,9 @@ Subject: Grüße
 Hello Bob,
 ```
 
-The header window shows only **To**, **Cc**, **Bcc** and **Subject** (and the
-`Attach:` lines of attached files). The other headers are filled in by emsg
-and sent along without being shown: **From** (your full name and address),
-**Date**, and for a reply **In-Reply-To** and **References**. To see or change
-them, open the message in your own editor with `:e`. A header line you add
-yourself (Enter in the header window, e.g. `Reply-To: ...`) stays visible.
-
 The editor has two windows: the **header** on top and the **message** below.
-**Wrap** (menu item, key **W**) wraps message lines while you type at the wrap
-width, **72 columns** by default: the last word that does not fit moves to the
-next line, and inside a paragraph the following lines are re-wrapped as you
-insert text. Wrap is **on for a new message** (M) and **off for a reply or
-forward** (R, F), whose quoted text keeps its own layout; W switches it on or
-off at any time, and the menu shows *Wrap* inverted while it is on. **gq**
-(command mode) re-wraps the paragraph under the cursor at the wrap width, also
-when Wrap is off. Quoted lines (`>`) and words longer than the width are not
-broken; the screen still wraps anything wider than the window.
 
-The wrap width is a setting: **C** (Config) → *Wrap width for new mail*, or
-`wrap_width = 72` in `emsg.conf` (20–998).
-
-Messages are sent as `text/plain; format=flowed` (RFC 3676). A wrapped line
-keeps its space at the end; that marks a *soft* break, so mail programs that
-support format=flowed join the lines into one paragraph again and fit it to
-their window, while others show the 72-column lines. **Enter** makes a hard
-break: it removes spaces at the end of the line. Lines that start with a space
-or `From ` get one extra space (space-stuffing, removed by the receiver), and
-the signature separator `-- ` keeps its space.
-
-Incoming `format=flowed` mail is unwrapped for display: soft-broken lines are
-joined into paragraphs (also inside quotes, per quote level), space-stuffing is
-removed, `DelSp=yes` is honoured, and the paragraphs are wrapped to the width of
-the message window. A reply to such a message quotes it as flowed text again:
-each paragraph gets one more `>` and is wrapped at 72 columns with soft breaks.
-Quotes of other messages are copied line by line, without trailing spaces.
-
-1. It opens in the **header window**. Fill in the headers; Enter adds a
+1. The editor opens in the **header window**. Fill in the headers; Enter adds a
    header line.
 2. **Tab** closes the header window: the headers stay visible above, and you
    type the message text in the window below. **↓** on the last header
@@ -517,10 +509,11 @@ Quotes of other messages are copied line by line, without trailing spaces.
    for the mouse (typed letters are text): a click on a command leaves editing
    and runs it; Esc=leaveEdit goes to command mode. The status line shows the
    keys of the window and the cursor position (Ln, Col).
-   **Esc** leaves editing (in the header or the message window) for
+4. **Esc** leaves editing (in the header or the message window) for
    **command mode**, with the menu **EdIt** **S**end **K**eep **H**eader
-   **W**rap a**T**tach. **Esc** in command mode closes the editor and returns to
-   the email list and the message (asking first if the text was changed):
+   **W**rap a**T**tach and the keys below. **Esc** in command mode closes the
+   editor and returns to the email list and the message (asking first if the
+   text was changed).
 
 | Key | Action |
 |---|---|
@@ -536,11 +529,48 @@ Quotes of other messages are copied line by line, without trailing spaces.
 | arrows, Ctrl-← Ctrl-→ (word), b, PgUp PgDn, 0 $, gg G, Ctrl-F/B | move (the menu letters E I S K H W work in either case, so vim's h j k l and w are not used) |
 | :q :q! :w :x :e :N | quit, quit without asking, keep, send, open in `$VISUAL`/`$EDITOR`, go to line N |
 | Q, Esc | leave, back to the email list; asks Continue editing / Keep as draft / Discard if changed (Esc after d, y, g or Z only cancels that command) |
-| Ctrl-Q, Ctrl-C | quit emsg at once; changed text is saved in `~/.local/share/emsg/unsent-DATE.txt` (mode 0600) |
+| Ctrl-Q, Ctrl-C | quit mcm at once; changed text is saved in `~/.local/share/mcm/unsent-DATE.txt` (mode 0600) |
 | mouse | click a menu item, or click in either window to edit there |
 
 Shortcut letters in menus and dialog buttons are shown in the `HOTKEY` color
 (orange by default).
+
+The header window shows only **To**, **Cc**, **Bcc** and **Subject** (and the
+`Attach:` lines of attached files). The other headers are filled in by mcm
+and sent along without being shown: **From** (your full name and address),
+**Date**, and for a reply **In-Reply-To** and **References**. To see or change
+them, open the message in your own editor with `:e`. A header line you add
+yourself (Enter in the header window, e.g. `Reply-To: ...`) stays visible.
+
+### Wrapping and format=flowed
+
+**Wrap** (menu item, key **W**) wraps message lines while you type at the wrap
+width, **72 columns** by default: the last word that does not fit moves to the
+next line, and inside a paragraph the following lines are re-wrapped as you
+insert text. Wrap is **on for a new message** (M) and **off for a reply or
+forward** (R, F), whose quoted text keeps its own layout; W switches it on or
+off at any time, and the menu shows *Wrap* inverted while it is on. **gq**
+(command mode) re-wraps the paragraph under the cursor at the wrap width, also
+when Wrap is off. Quoted lines (`>`) and words longer than the width are not
+broken; the screen still wraps anything wider than the window.
+
+The wrap width is a setting: **C** (Config) → *Wrap width for new mail*, or
+`wrap_width = 72` in `mcm.conf` (20–998).
+
+Messages are sent as `text/plain; format=flowed` (RFC 3676). A wrapped line
+keeps its space at the end; that marks a *soft* break, so mail programs that
+support format=flowed join the lines into one paragraph again and fit it to
+their window, while others show the 72-column lines. **Enter** makes a hard
+break: it removes spaces at the end of the line. Lines that start with a space
+or `From ` get one extra space (space-stuffing, removed by the receiver), and
+the signature separator `-- ` keeps its space.
+
+Incoming `format=flowed` mail is unwrapped for display: soft-broken lines are
+joined into paragraphs (also inside quotes, per quote level), space-stuffing is
+removed, `DelSp=yes` is honoured, and the paragraphs are wrapped to the width of
+the message window. A reply to such a message quotes it as flowed text again:
+each paragraph gets one more `>` and is wrapped at 72 columns with soft breaks.
+Quotes of other messages are copied line by line, without trailing spaces.
 
 ### Attachments
 
@@ -565,6 +595,8 @@ name; names that are long or not plain ASCII are written per RFC 2231
 (`filename*0*=utf-8''Gr%C3%BC%C3%9Fe...`). The `Attach:` lines themselves are
 not sent.
 
+### Checks before sending
+
 Before anything is sent, the headers are checked; an error opens the header
 window on the line in question:
 
@@ -579,11 +611,11 @@ window on the line in question:
 - **Message-ID, In-Reply-To, References** must be `<left@right>` ids.
 - **Subject** may be empty (the send confirmation mentions it).
 - Each header may appear only once; `MIME-Version`, `Content-*` and `User-Agent`
-  are set by emsg. Other headers (`X-...`, `Organization`, ...) are passed on.
+  are set by mcm. Other headers (`X-...`, `Organization`, ...) are passed on.
 
-The message that goes out:
+### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: emsg/0.94`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.95 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -597,27 +629,28 @@ The message that goes out:
 
 Reply quotes the loaded text of the message with `> ` and sets In-Reply-To and
 References. Forward includes the original headers and text, but not its
-attachments yet. Text taken from the original is made valid UTF-8 first: mail from older
-programs often has bytes in Windows-1252 (or a missing or wrong charset), and
-HTML mail has codes such as `&#146;`; these become the characters they stand
-for (`€`, `é`, `’`), and control characters other than tab are left out.
-Without that, the check before sending would refuse the message.
+attachments yet. Text taken from the original is made valid UTF-8 first: mail
+from older programs often has bytes in Windows-1252 (or a missing or wrong
+charset), and HTML mail has codes such as `&#146;`; these become the
+characters they stand for (`€`, `é`, `’`), and control characters other than
+tab are left out. Without that, the check before sending would refuse the
+message.
 
 ### Sending (SMTP)
 
 The **From** address comes from the login: the login name if it is an address
 (`me@example.org`), otherwise `login@domain`, where the domain is the IMAP
-server name without a leading `imap.`/`imaps.`/`mail.` (logging in as `lucien`
-on `imap.example.org` gives `lucien@example.org`). The send confirmation warns
+server name without a leading `imap.`/`imaps.`/`mail.` (logging in as `me`
+on `imap.example.org` gives `me@example.org`). The send confirmation warns
 if the From line was changed to another address.
 
 Outgoing mail also follows the login: server `smtp.<domain>` (or the IMAP
 server itself), port 587, the same user and password. **C** (Config) → *Outgoing mail*
 shows and changes these; changes are remembered for that login only, and a
 different login starts again from the derived settings. Port **587** uses
-STARTTLS (RFC 3207), which is required: emsg never sends without encryption.
+STARTTLS (RFC 3207), which is required: mcm never sends without encryption.
 Port **465** uses TLS from the start (RFC 8314); for another TLS port put
-`smtp_security = tls` in `emsg.conf`. Leave the password empty to use the IMAP
+`smtp_security = tls` in `mcm.conf`. Leave the password empty to use the IMAP
 password. The client follows RFC 5321bis: EHLO
 (HELO as fallback) with the host name or an address literal, the SIZE,
 8BITMIME, SMTPUTF8 and AUTH PLAIN/LOGIN extensions, dot-stuffing, CRLF line
@@ -649,7 +682,7 @@ as they are.
 
 ## Memory use
 
-emsg only keeps in memory what is on screen, so folder and message size do not
+mcm only keeps in memory what is on screen, so folder and message size do not
 limit it:
 
 - **Message list:** headers are fetched in blocks of 100 around the visible rows,
@@ -671,10 +704,10 @@ limit it:
 ## Themes
 
 Colors are read at every start from the text file
-`~/.config/emsg/NAME.theme` (NAME from `-t` or `theme =` in `emsg.conf`,
-default `default`). If that file does not exist yet, emsg creates it: a copy
-of `./themes/NAME.theme` or `$(PREFIX)/share/emsg/themes/NAME.theme`, or the
-built-in colors for `default`. Edit it and start emsg again to see the change.
+`~/.config/mcm/NAME.theme` (NAME from `-t` or `theme =` in `mcm.conf`,
+default `default`). If that file does not exist yet, mcm creates it: a copy
+of `./themes/NAME.theme` or `$(PREFIX)/share/mcm/themes/NAME.theme`, or the
+built-in colors for `default`. Edit it and start mcm again to see the change.
 `-t` also accepts a path to a theme file.
 
 ```
@@ -692,35 +725,35 @@ prefix, `gray`, `darkgray`, `darkblue` (#000040), `navy`, `orange`, `default` (t
 a number 0–255 or `#RRGGBB`. An `#RRGGBB` color (and `darkblue`) is shown exactly on a
 24-bit color terminal; otherwise the nearest of the 256 colors is used (`darkblue` becomes
 color 17, #00005f). With `TERM=xterm-256color` and `COLORTERM=truecolor` (or `24bit`), as
-GNOME Terminal, Konsole and most modern terminals set, emsg uses the `xterm-direct`
-terminal description to send 24-bit colors; set `EMSG_NO_DIRECT=1` to prevent that.
+GNOME Terminal, Konsole and most modern terminals set, mcm uses the `xterm-direct`
+terminal description to send 24-bit colors; set `MCM_NO_DIRECT=1` to prevent that.
 Included: `default`, `mc`, `dark`, `mono`.
 
 ## Windows
 
-emsg runs on Windows 10 and 11 in the console: Windows Terminal, or cmd.exe
+mcm runs on Windows 10 and 11 in the console: Windows Terminal, or cmd.exe
 in the classic console window. A ready-made zip is at
-<https://sc00by.nl/lucien/emsg/emsg.zip>; to build it yourself see
+<https://sc00by.nl/lucien/mcm/mcm.zip>; to build it yourself see
 [Build, Windows 10 and 11](#windows-10-and-11).
 
 ### Installing
 
-1. **Unblock the zip first** (optional, see below): right-click `emsg.zip`,
+1. **Unblock the zip first** (optional, see below): right-click `mcm.zip`,
    *Properties*, tick *Unblock*, *OK*.
 2. **Unpack it completely**: right-click, *Extract All*. This gives a folder
-   `emsg` with `emsg.exe` and `themes\`. Do not start `emsg.exe` by
+   `mcm` with `mcm.exe` and `themes\`. Do not start `mcm.exe` by
    double-clicking it inside the zip: Windows then copies only that one file
    to a temporary folder, without the themes.
-3. Open Windows Terminal or cmd.exe in that folder and run `emsg.exe` (in
-   PowerShell: `.\emsg.exe`). Or put the folder in your `PATH`.
+3. Open Windows Terminal or cmd.exe in that folder and run `mcm.exe` (in
+   PowerShell: `.\mcm.exe`). Or put the folder in your `PATH`.
 
-`emsg.exe` is a single file: everything it needs is built in, so there are
+`mcm.exe` is a single file: everything it needs is built in, so there are
 no DLLs to keep next to it (versions before 0.94 came with five DLLs and
 stopped with *"... .dll was not found"* when started without them).
 
 ### "Unknown publisher"
 
-emsg.exe is not signed, so the first start shows *Windows protected your
+mcm.exe is not signed, so the first start shows *Windows protected your
 PC* (SmartScreen) or an *Unknown publisher* warning. Choose *More info*,
 *Run anyway*. Unblocking the zip before unpacking (step 1 above) prevents
 the warning. Making it go away for everyone would need a code signing
@@ -729,10 +762,10 @@ certificate from a certificate authority.
 ### Starting
 
 ```
-emsg.exe                                  the account last used, or a new one
-emsg.exe -s imap.example.org -u me        IMAPS
-emsg.exe pop3s://me@pop.example.org       POP3S
-emsg.exe C:\Users\me\Maildir              local mail (Maildir, mbox, MH)
+mcm.exe                                  the account last used, or a new one
+mcm.exe -s imap.example.org -u me        IMAPS
+mcm.exe pop3s://me@pop.example.org       POP3S
+mcm.exe C:\Users\me\Maildir             local mail (Maildir, mbox, MH)
 ```
 
 All other options, keys and the mouse work as on Linux.
@@ -741,10 +774,10 @@ All other options, keys and the mouse work as on Linux.
 
 | | Linux / BSD | Windows |
 |---|---|---|
-| configuration, certificates, stored passwords | `~/.config/emsg` | `%APPDATA%\emsg` |
-| POP3 folders, unsent messages | `~/.local/share/emsg` | `%LOCALAPPDATA%\emsg` |
-| trusted CA certificates | the system's CA file | the Windows certificate store, plus `cacert.pem` next to `emsg.exe` if present |
-| themes shipped with emsg | `/usr/local/share/emsg/themes` | `themes\` next to `emsg.exe` |
+| configuration, certificates, stored passwords | `~/.config/mcm` | `%APPDATA%\mcm` |
+| POP3 folders, unsent messages | `~/.local/share/mcm` | `%LOCALAPPDATA%\mcm` |
+| trusted CA certificates | the system's CA file | the Windows certificate store, plus `cacert.pem` next to `mcm.exe` if present |
+| themes shipped with mcm | `/usr/local/share/mcm/themes` | `themes\` next to `mcm.exe` |
 | Maildir file names | `NAME:2,FLAGS` | `NAME!2,FLAGS` (`:` is not allowed in a Windows file name) |
 | external editor (`$VISUAL`, `$EDITOR`) | `vi` | `notepad` |
 | Ctrl-C | quits, also during a network wait | quits at the next key read |
@@ -774,7 +807,7 @@ be limited on purpose:
   the TLS session and takes seconds, but nothing is written to disk. (Saved TLS
   1.2 session data would let anyone who copies it decrypt the next session,
   including the password, or pose as the server.)
-- **Server certificates are saved**, as in `~/.config/emsg/certs`. A saved
+- **Server certificates are saved**, as in `~/.config/mcm/certs`. A saved
   certificate contains no secrets. On later runs the certificate chain is not
   checked again, but the server's signature over the key exchange still is.
 
@@ -869,7 +902,7 @@ Notes:
 | `src/vault.c`| stored passwords: scrypt + AES-256-GCM |
 | `src/util.c` | buffers, UTF-8 helpers |
 | `src/compat.h`, `src/win32.c` | Windows: the POSIX functions MinGW lacks (`make win`) |
-| `win/emsg.rc`, `win/emsg.manifest` | Windows: UTF-8 file names and long paths |
+| `win/mcm.rc`, `win/mcm.manifest` | Windows: UTF-8 file names and long paths |
 | `dos/bench.c`, `dos/vectors.h` | MS-DOS TLS benchmark (BearSSL), with known-answer tests |
 | `dos/bearssl-0.6-16bit.patch` | makes BearSSL 0.6 build with 16-bit compilers |
 
@@ -888,5 +921,5 @@ Notes:
 
 ## License
 
-emsg is free software under the GNU General Public License, version 3 or
+mcm is free software under the GNU General Public License, version 3 or
 (at your option) any later version; see [LICENSE](LICENSE).

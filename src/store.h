@@ -1,14 +1,14 @@
 /* store.h - where the mail is: an IMAP server, a POP3 server, or local files
  *
- * One interface for the three kinds of account; the rest of emsg does not
+ * One interface for the three kinds of account; the rest of mcm does not
  * need to know which it is. The calls mirror imap.h:
  *   IMAP   all folders are on the server;
  *   POP3   INBOX is on the server (messages are left there); Sent, Drafts
  *          and any other folders are local, in the account's folder path;
  *   LOCAL  Maildir and mbox folders on this computer (local.h).
  */
-#ifndef EMSG_STORE_H
-#define EMSG_STORE_H
+#ifndef MCM_STORE_H
+#define MCM_STORE_H
 
 #include "imap.h"
 

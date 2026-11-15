@@ -1,7 +1,7 @@
-# Text of 'emsg --help' (and -h). Edit it, then run make: the build turns this
+# Text of 'mcm --help' (and -h). Edit it, then run make: the build turns this
 # file into C strings (src/helptext.h). Lines starting with '#' are left out;
 # @VERSION@ becomes the version number. Keep lines within 80 columns.
-emsg @VERSION@ - console mail client.
+Mail Commander (mcm) @VERSION@ - console mail client.
 
 -Supports imap(s) pop3(s), maildir, mbox and MH mailstore formats.
 -Can be fully controled by keyboard, has limited mouse support.
@@ -17,8 +17,8 @@ labour of many people. A small thank you is listed at the end of this file.
 The source of this program is licensed under GPLv3.
 
 Usage:
-  emsg                      the only account, or choose one from a list
-  emsg [options] [WHERE]    WHERE says where the mail is (see below)
+  mcm                       the only account, or choose one from a list
+  mcm [options] [WHERE]     WHERE says where the mail is (see below)
 
 Options:
   -a NAME     use account NAME from the config file (a new one if unknown)
@@ -27,52 +27,52 @@ Options:
   -s SERVER   IMAP/POP3 server host name
   -p PORT     port (default 993 for IMAP, 995 for POP3)
   -u USER     login name
-  -t THEME    color theme: a name (~/.config/emsg/NAME.theme) or a file
+  -t THEME    color theme: a name (~/.config/mcm/NAME.theme) or a file
   -V          version
   -h, --help  this text
 
 An account with the same server and user (or path) is used, or a new one is
-made and kept in ~/.config/emsg/emsg.conf. Passwords are never taken from the
+made and kept in ~/.config/mcm/mcm.conf. Passwords are never taken from the
 command line; they are asked for, and can be stored encrypted.
 
-WHERE - the kinds of mail emsg reads:
+WHERE - the kinds of mail mcm reads:
 
   IMAP over TLS - mail and folders stay on the server.
     imaps://[USER@]HOST[:PORT][/FOLDER]            (port 993)
-      emsg imaps://jan@imap.example.com
-      emsg imaps://jan@example.com@mail.example.com:993/Archive/2025
+      mcm imaps://jan@imap.example.com
+      mcm imaps://jan@example.com@mail.example.com:993/Archive/2025
     The user may be an e-mail address: the last '@' ends it.
 
   POP3 over TLS - INBOX is read from the server and left there.
     pop3s://[USER@]HOST[:PORT]                     (port 995)
-      emsg pop3s://jan@pop.example.com
-      emsg pop3s://jan@example.com@mail.example.com:110   (110: STLS required)
-    Sent, Drafts and other folders are local, in ~/.local/share/emsg/ACCOUNT/;
+      mcm pop3s://jan@pop.example.com
+      mcm pop3s://jan@example.com@mail.example.com:110   (110: STLS required)
+    Sent, Drafts and other folders are local, in ~/.local/share/mcm/ACCOUNT/;
     seen/answered marks are kept there too. F5 checks for new mail.
 
   Maildir - a directory with cur/ new/ tmp/, one file per message;
   subfolders are .Name directories inside it (Maildir++).
-      emsg ~/Maildir
-      emsg maildir:/home/jan/Maildir
+      mcm ~/Maildir
+      mcm maildir:/home/jan/Maildir
 
   mbox - one file holding many messages, each starting with a "From " line.
-      emsg /var/spool/mail/jan
-      emsg mbox:~/mbox
+      mcm /var/spool/mail/jan
+      mcm mbox:~/mbox
     It is only read and appended to; messages read count as seen until exit.
 
   MH - a directory of numbered message files (1, 2, 3 ...), with the
   unseen/replied/flagged lists in .mh_sequences; subdirectories are folders.
-      emsg ~/Mail/inbox
+      mcm ~/Mail/inbox
 
   A directory of folders - every Maildir, mbox file and MH folder under it
   becomes a folder (subdirectories nest); $MAIL is INBOX if none is found.
-      emsg ~/Mail
-      emsg file:///home/jan/Mail
+      mcm ~/Mail
+      mcm file:///home/jan/Mail
 
   A local path starts with '/', '~' or '.', or with file://, maildir: or mbox:.
   In local folders and POP3 accounts, Sent and Drafts are made when first used.
 
-Keys (F1 in emsg shows them all):
+Keys (F1 in mcm shows them all):
   Tab           email list / folders (up to 150 columns)   Enter  open
   Left / Right  move between the windows
   PgUp/PgDn     page the list       Space / Shift-, Ctrl-, Alt-Space or
@@ -83,14 +83,16 @@ Keys (F1 in emsg shows them all):
   L             filter the email list on subject or sender (Esc: all again)
   F5            new mail            Q  quit
   Ctrl-Q        quit at once, from anywhere (a message being written is
-                saved in ~/.local/share/emsg/unsent-DATE.txt)
-  Ctrl-C        the same, also while emsg waits for the network;
+                saved in ~/.local/share/mcm/unsent-DATE.txt)
+  Ctrl-C        the same, also while mcm waits for the network;
                 a second Ctrl-C leaves immediately
 
 Files:
-  ~/.config/emsg/emsg.conf      accounts and settings (mode 0600)
-  ~/.config/emsg/NAME.theme     colors, read at every start
-  ~/.config/emsg/certs          certificates you chose to always accept
+  ~/.config/mcm/mcm.conf        accounts and settings (mode 0600)
+  ~/.config/mcm/NAME.theme      colors, read at every start
+  ~/.config/mcm/certs           certificates you chose to always accept
+  Up to 0.94 the program was called emsg; its ~/.config/emsg and
+  ~/.local/share/emsg are renamed to mcm at the first start.
 
 Libraries and software used:
   ncurses       the screen, keys and mouse (wide-character build, libncursesw)
@@ -103,7 +105,7 @@ Libraries and software used:
   C library     sockets, iconv (character sets), locale - the GNU C Library
                 (glibc) or the system's own C library
   Build tools   a C compiler (GCC or Clang), make, awk, pkg-config
-  Claude Code   emsg was written with Claude Code, Anthropic's AI coding
+  Claude Code   mcm was written with Claude Code, Anthropic's AI coding
                 assistant
 
 Thanks to:
@@ -115,7 +117,7 @@ Thanks to:
   D. J. Bernstein for Maildir, Sam Varshavchik for Maildir++, the RAND
   Corporation (Bruce Borden, Stockton Gaines, Norman Shapiro) and the nmh
   developers for MH, and Unix mail for mbox.
-  The authors of the standards emsg follows, among them:
+  The authors of the standards mcm follows, among them:
     IMAP     Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman (RFC 5092)
     POP3     John Myers, Marshall Rose (RFC 1939); Chris Newman (RFC 2595)
     SMTP     John Klensin (RFC 5321); Paul Hoffman (RFC 3207)

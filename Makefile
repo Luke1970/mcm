@@ -1,13 +1,13 @@
-# emsg - console mail client
+# Mail Commander (mcm) - console mail client
 #
 # GNU make is needed: "make" on Linux, "gmake" on FreeBSD, OpenBSD and NetBSD.
 # See README.md, "Build", for the packages per system.
 #
-#   make                  build emsg
+#   make                  build mcm
 #   make install          install in $(PREFIX) (default /usr/local)
 #   make uninstall        remove it again
 #   make clean            remove what make built
-#   make win              Windows 10/11: win/emsg.exe plus its DLLs in win/emsg/
+#   make win              Windows 10/11: win/mcm/mcm.exe (one file) and win/mcm.zip
 #                         (cross-compiled with MinGW-w64, see README.md)
 #   make dos-bench        MS-DOS: the TLS benchmark (Open Watcom, BearSSL)
 #
@@ -17,7 +17,7 @@
 
 CC      ?= cc
 PREFIX  ?= /usr/local
-DATADIR ?= $(PREFIX)/share/emsg
+DATADIR ?= $(PREFIX)/share/mcm
 CFLAGS  ?= -O2 -g
 
 OS := $(shell uname -s)
@@ -54,20 +54,20 @@ OS_CFLAGS     := -I/usr/local/include
 OS_LDFLAGS    := -L/usr/local/lib
 endif
 
-EMSG_CFLAGS := -std=gnu11 -Wall -Wextra -D_GNU_SOURCE -DDATADIR=\"$(DATADIR)\" \
+MCM_CFLAGS := -std=gnu11 -Wall -Wextra -D_GNU_SOURCE -DDATADIR=\"$(DATADIR)\" \
                $(CURSES_CFLAGS) $(SSL_CFLAGS) $(OS_CFLAGS)
-EMSG_LIBS   := $(CURSES_LIBS) $(SSL_LIBS) $(ICONV_LIBS)
+MCM_LIBS   := $(CURSES_LIBS) $(SSL_LIBS) $(ICONV_LIBS)
 
 SRC := $(wildcard src/*.c)
 OBJ := $(SRC:.c=.o)
 
-all: emsg
+all: mcm
 
-emsg: $(OBJ)
-	$(CC) $(LDFLAGS) $(OS_LDFLAGS) -o $@ $(OBJ) $(EMSG_LIBS) $(LDLIBS)
+mcm: $(OBJ)
+	$(CC) $(LDFLAGS) $(OS_LDFLAGS) -o $@ $(OBJ) $(MCM_LIBS) $(LDLIBS)
 
 src/%.o: src/%.c $(wildcard src/*.h)
-	$(CC) $(CPPFLAGS) $(EMSG_CFLAGS) $(CFLAGS) -c -o $@ $<
+	$(CC) $(CPPFLAGS) $(MCM_CFLAGS) $(CFLAGS) -c -o $@ $<
 
 # The help texts are plain text files in help/; they are compiled in.
 HELP := help/cmdline.txt help/usage.txt help/keys.txt help/editor.txt
@@ -80,43 +80,43 @@ src/helptext.h: $(HELP) tools/txt2c.awk
 
 src/main.o src/editor.o: src/helptext.h
 
-install: emsg
+install: mcm
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(DATADIR)/themes
-	install -m 755 emsg $(DESTDIR)$(PREFIX)/bin/emsg
+	install -m 755 mcm $(DESTDIR)$(PREFIX)/bin/mcm
 	install -m 644 themes/*.theme $(DESTDIR)$(DATADIR)/themes/
 
 uninstall:
-	rm -f $(DESTDIR)$(PREFIX)/bin/emsg
+	rm -f $(DESTDIR)$(PREFIX)/bin/mcm
 	rm -rf $(DESTDIR)$(DATADIR)
 
 clean:
-	rm -f emsg $(OBJ) src/helptext.h
-	rm -rf win/obj win/emsg win/emsg.zip
+	rm -f mcm $(OBJ) src/helptext.h
+	rm -rf win/obj win/mcm win/mcm.zip
 	rm -rf dos/obj16 dos/obj32 dos/*.EXE dos/*.o dos/*.obj dos/*.err
 
 # ---------------------------------------------------------------------------
 # Windows 10 / 11, cross-compiled with MinGW-w64. The result is one file,
-# win/emsg/emsg.exe, with PDCurses (the Windows console), OpenSSL, zlib and
-# win-iconv built in, plus win/emsg/themes; also packed as win/emsg.zip.
+# win/mcm/mcm.exe, with PDCurses (the Windows console), OpenSSL, zlib and
+# win-iconv built in, plus win/mcm/themes; also packed as win/mcm.zip.
 # Fedora:
 #   dnf install mingw64-gcc mingw64-openssl-static mingw64-zlib-static \
 #               mingw64-win-iconv-static
 # PDCurses 3.8 is compiled from its source (PDCURSES = the unpacked
 # PDCurses-3.8 directory, https://github.com/wmcbrine/PDCurses/releases),
-# with the same settings as emsg: wide characters, UTF-8, RGB color numbers.
+# with the same settings as mcm: wide characters, UTF-8, RGB color numbers.
 WIN_CC     ?= x86_64-w64-mingw32-gcc
 WIN_AR     ?= x86_64-w64-mingw32-ar
 WIN_RC     ?= x86_64-w64-mingw32-windres
 WIN_ROOT   ?= /usr/x86_64-w64-mingw32/sys-root/mingw
 WIN_LIBDIR ?= $(WIN_ROOT)/lib
 PDCURSES   ?= PDCurses-3.8
-WIN_OBJ    := $(patsubst src/%.c,win/obj/%.o,$(SRC)) win/obj/emsg.res
+WIN_OBJ    := $(patsubst src/%.c,win/obj/%.o,$(SRC)) win/obj/mcm.res
 WIN_FLAGS  := -std=gnu11 -Wall -Wextra -D_GNU_SOURCE -D__USE_MINGW_ANSI_STDIO=1 \
               -D_FILE_OFFSET_BITS=64 -include src/compat.h -I$(PDCURSES) -I$(WIN_ROOT)/include
 PDC_FLAGS  := -O2 -DPDC_WIDE -DPDC_FORCE_UTF8 -DPDC_RGB -I$(PDCURSES)
 PDC_SRC     = $(wildcard $(PDCURSES)/pdcurses/*.c) $(wildcard $(PDCURSES)/wincon/*.c)
 
-win: win/emsg/emsg.exe
+win: win/mcm/mcm.exe
 
 win-check:
 	@test -f $(PDCURSES)/curses.h || { echo "PDCurses source not found: set PDCURSES=dir (now $(PDCURSES))"; exit 1; }
@@ -133,20 +133,19 @@ win/obj/%.o: src/%.c $(wildcard src/*.h) | win/obj/libpdcurses.a
 
 win/obj/main.o win/obj/editor.o: src/helptext.h
 
-win/obj/emsg.res: win/emsg.rc win/emsg.manifest
+win/obj/mcm.res: win/mcm.rc win/mcm.manifest
 	@mkdir -p win/obj
-	cd win && $(WIN_RC) -O coff -o obj/emsg.res emsg.rc
+	cd win && $(WIN_RC) -O coff -o obj/mcm.res mcm.rc
 
-win/emsg/emsg.exe: $(WIN_OBJ) win/obj/libpdcurses.a
-	@mkdir -p win/emsg/themes
-	rm -f win/emsg/*.dll
+win/mcm/mcm.exe: $(WIN_OBJ) win/obj/libpdcurses.a
+	@mkdir -p win/mcm/themes
 	$(WIN_CC) -static -s -o $@ $(WIN_OBJ) win/obj/libpdcurses.a -L$(WIN_LIBDIR) -lssl -lcrypto \
 	  -lz -liconv -lws2_32 -lcrypt32 -lbcrypt -ladvapi32 -luser32 -lgdi32 -lpathcch
-	cp themes/*.theme win/emsg/themes/
-	cd win && rm -f emsg.zip && { command -v zip >/dev/null && zip -qr emsg.zip emsg || true; }
+	cp themes/*.theme win/mcm/themes/
+	cd win && rm -f mcm.zip && { command -v zip >/dev/null && zip -qr mcm.zip mcm || true; }
 
 # ---------------------------------------------------------------------------
-# MS-DOS. emsg itself does not run on DOS yet (see README.md, "MS-DOS"); what
+# MS-DOS. mcm itself does not run on DOS yet (see README.md, "MS-DOS"); what
 # builds is the TLS benchmark that measures BearSSL on an 8088 or 386:
 #   dos/BENCH.EXE    16-bit, any PC (8088 and up), large memory model
 #   dos/BENCH32.EXE  32-bit, 386 and up, with the DOS/32A extender built in

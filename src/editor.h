@@ -10,8 +10,8 @@
  * the space left at the end of a wrapped line marks a soft break
  * (format=flowed, RFC 3676). gq re-wraps a paragraph.
  */
-#ifndef EMSG_EDITOR_H
-#define EMSG_EDITOR_H
+#ifndef MCM_EDITOR_H
+#define MCM_EDITOR_H
 
 #include <stddef.h>
 
@@ -34,8 +34,8 @@ typedef struct {
 void editor_run(const editor_cfg *cfg, const char *text, int start_line);
 
 /* If a message is being edited and was changed, save its text in
- * ~/.local/share/emsg/unsent-DATE.txt (path returned; "" when nothing was
- * saved). Used when Ctrl-Q or Ctrl-C quits emsg from inside the editor. */
+ * ~/.local/share/mcm/unsent-DATE.txt (path returned; "" when nothing was
+ * saved). Used when Ctrl-Q or Ctrl-C quits mcm from inside the editor. */
 int editor_save_unsent(char *path, size_t n);
 
 /* Redraw the editor screen (background for dialogs opened by callbacks). */

@@ -744,14 +744,14 @@ static void external_editor(ed_t *e)
 	char path[512];
 	int fd = -1;
 	for (int i = 0; i < 100 && fd < 0; i++) {
-		snprintf(path, sizeof path, "%s/emsg-%d-%d.txt", tmp && *tmp ? tmp : ".", (int)getpid(), i);
+		snprintf(path, sizeof path, "%s/mcm-%d-%d.txt", tmp && *tmp ? tmp : ".", (int)getpid(), i);
 		fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600);
 	}
 #else
 	if (!ed || !*ed) ed = "vi";
 	const char *tmp = getenv("TMPDIR");
 	char path[512];
-	snprintf(path, sizeof path, "%s/emsg-XXXXXX.eml", tmp && *tmp ? tmp : "/tmp");
+	snprintf(path, sizeof path, "%s/mcm-XXXXXX.eml", tmp && *tmp ? tmp : "/tmp");
 	int fd = mkstemps(path, 4);
 #endif
 	if (fd < 0) {
@@ -783,7 +783,7 @@ static void external_editor(ed_t *e)
 	reset_prog_mode();
 	refresh();
 #else
-	/* while the other editor runs, Ctrl-C is its own, not "quit emsg" */
+	/* while the other editor runs, Ctrl-C is its own, not "quit mcm" */
 	struct sigaction ign, old;
 	memset(&ign, 0, sizeof ign);
 	ign.sa_handler = SIG_IGN;
@@ -1110,8 +1110,8 @@ static void attach_file(ed_t *e)
 	free(path);
 }
 
-/* Ctrl-Q / Ctrl-C: emsg quits at once; the message being written is not lost but saved
- * as a text file (~/.local/share/emsg/unsent-DATE.txt). */
+/* Ctrl-Q / Ctrl-C: mcm quits at once; the message being written is not lost but saved
+ * as a text file (~/.local/share/mcm/unsent-DATE.txt). */
 int editor_save_unsent(char *path, size_t n)
 {
 	*path = '\0';
@@ -1120,8 +1120,8 @@ int editor_save_unsent(char *path, size_t n)
 	char *t = get_text(E, &len);
 	const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
 	char dir[900];
-	if (xdg && *xdg) snprintf(dir, sizeof dir, "%.800s/emsg", xdg);
-	else snprintf(dir, sizeof dir, "%.800s/.local/share/emsg", home ? home : ".");
+	if (xdg && *xdg) snprintf(dir, sizeof dir, "%.800s/mcm", xdg);
+	else snprintf(dir, sizeof dir, "%.800s/.local/share/mcm", home ? home : ".");
 	for (char *s = dir + 1; *s; s++)
 		if (*s == '/') { *s = '\0'; mkdir(dir, 0700); *s = '/'; }
 	mkdir(dir, 0700);

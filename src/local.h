@@ -15,14 +15,14 @@
  * sequences unseen, replied and flagged in .mh_sequences (rewritten as a new
  * file, other sequences kept). An mbox file is only read
  * (and appended to): its Status/X-Status headers give the flags, and "seen"
- * set here lasts until emsg exits. POP3 has no flags: seen and answered are
+ * set here lasts until mcm exits. POP3 has no flags: seen and answered are
  * kept per message id in a state file.
  *
  * The functions mirror the IMAP client (imap.h); messages have sequence
- * numbers 1..n in folder order and uids that stay the same while emsg runs.
+ * numbers 1..n in folder order and uids that stay the same while mcm runs.
  */
-#ifndef EMSG_LOCAL_H
-#define EMSG_LOCAL_H
+#ifndef MCM_LOCAL_H
+#define MCM_LOCAL_H
 
 #include "imap.h"
 #include "pop3.h"

@@ -1,6 +1,6 @@
 /* util.h - small helpers: allocation, growable buffers, UTF-8 */
-#ifndef EMSG_UTIL_H
-#define EMSG_UTIL_H
+#ifndef MCM_UTIL_H
+#define MCM_UTIL_H
 
 #include <signal.h>
 #include <stddef.h>
@@ -8,11 +8,11 @@
 #include <wchar.h>
 
 /* printf-style checking: MinGW's C99 printf is "gnu_printf" (compat.h) */
-#ifndef EMSG_PRINTF
-#define EMSG_PRINTF printf
+#ifndef MCM_PRINTF
+#define MCM_PRINTF printf
 #endif
 
-/* Set by Ctrl-C (SIGINT): network waits stop, and emsg quits at the next
+/* Set by Ctrl-C (SIGINT): network waits stop, and mcm quits at the next
  * key read (ui_getch). */
 extern volatile sig_atomic_t quit_requested;
 
@@ -30,7 +30,7 @@ char *xstrndup(const char *s, size_t n);   /* binary safe, always NUL-terminated
 void  buf_add(buf_t *b, const void *p, size_t n);
 void  buf_adds(buf_t *b, const char *s);
 void  buf_addc(buf_t *b, char c);
-void  buf_printf(buf_t *b, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 2, 3)));
+void  buf_printf(buf_t *b, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 2, 3)));
 char *buf_cstr(buf_t *b);                 /* NUL-terminate, return data */
 char *buf_steal(buf_t *b);                /* return malloc'd string, reset buffer */
 void  buf_free(buf_t *b);

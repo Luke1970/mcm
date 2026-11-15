@@ -1,5 +1,5 @@
-# Help window shown by F1 or ? in emsg. Edit it, then run make (see cmdline.txt).
-emsg @VERSION@ - console mail client
+# Help window shown by F1 or ? in mcm. Edit it, then run make (see cmdline.txt).
+Mail Commander (mcm) @VERSION@ - console mail client
 
 Tab                  switch the left window: email list / folders
                      (more than 150 columns: all three are shown)
@@ -31,7 +31,7 @@ F1 / ?               this help
 Q                    quit
 Ctrl-Q / Ctrl-C      quit at once, from anywhere (also in dialogs and
                      the editor; text being written is saved in
-                     ~/.local/share/emsg/unsent-DATE.txt). Ctrl-C also
+                     ~/.local/share/mcm/unsent-DATE.txt). Ctrl-C also
                      stops a network wait; twice: leave immediately
 Mouse                click the list's bottom border to filter
                      (Esc=Leave there ends it);
@@ -53,7 +53,7 @@ Libraries and software used:
   zlib          used by OpenSSL - Jean-loup Gailly, Mark Adler
   C library     sockets, iconv, locale - glibc or the system's own
   Build tools   C compiler (GCC or Clang), make, awk, pkg-config
-  Claude Code   emsg was written with Claude Code, Anthropic's AI
+  Claude Code   mcm was written with Claude Code, Anthropic's AI
                 coding assistant
 
 Thanks to:
@@ -64,7 +64,7 @@ Thanks to:
   David McGrew, John Viega (GCM).
   D. J. Bernstein (Maildir), Sam Varshavchik (Maildir++), the RAND
   Corporation and the nmh developers (MH), Unix mail (mbox).
-  The authors of the standards emsg follows, among them:
+  The authors of the standards mcm follows, among them:
     IMAP      Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman
     POP3      John Myers, Marshall Rose (RFC 1939); Chris Newman
     SMTP      John Klensin (RFC 5321); Paul Hoffman (RFC 3207)

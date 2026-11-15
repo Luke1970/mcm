@@ -1,8 +1,11 @@
 # build output
+/mcm
 /emsg
 src/*.o
 src/helptext.h
 win/obj/
+win/mcm/
+win/mcm.zip
 win/emsg/
 win/emsg.zip
 dos/obj16/

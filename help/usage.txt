@@ -1,4 +1,4 @@
 # Short usage, printed after a wrong option. Edit it, then run make.
-usage: emsg [-a account | -n] [-s server] [-p port] [-u user] [-t theme] [-f WHERE]
-       emsg [options] WHERE
-Try 'emsg --help' for the mail types, examples and keys.
+usage: mcm [-a account | -n] [-s server] [-p port] [-u user] [-t theme] [-f WHERE]
+      mcm [options] WHERE
+Try 'mcm --help' for the mail types, examples and keys.

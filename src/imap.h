@@ -1,6 +1,6 @@
 /* imap.h - minimal IMAP4rev1 client over TLS (IMAPS, port 993) */
-#ifndef EMSG_IMAP_H
-#define EMSG_IMAP_H
+#ifndef MCM_IMAP_H
+#define MCM_IMAP_H
 
 #include <stddef.h>
 #include <stdint.h>

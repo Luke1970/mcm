@@ -24,7 +24,7 @@ typedef struct {
 	buf_t all;        /* every line's text (for EHLO keywords) */
 } reply_t;
 
-static void setf(char *err, size_t n, const char *fmt, ...) __attribute__((format(EMSG_PRINTF, 3, 4)));
+static void setf(char *err, size_t n, const char *fmt, ...) __attribute__((format(MCM_PRINTF, 3, 4)));
 static void setf(char *err, size_t n, const char *fmt, ...)
 {
 	va_list ap;

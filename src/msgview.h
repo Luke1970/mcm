@@ -6,8 +6,8 @@
  * are never downloaded just to display a message. The hex view keeps a
  * single small window of raw bytes around the visible range.
  */
-#ifndef EMSG_MSGVIEW_H
-#define EMSG_MSGVIEW_H
+#ifndef MCM_MSGVIEW_H
+#define MCM_MSGVIEW_H
 
 #include <stddef.h>
 #include <stdint.h>
