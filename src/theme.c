@@ -396,6 +396,11 @@ void theme_apply(const theme_t *t)
 	init_extended_pair(CP_MENU, fit(t->menutxt), fit(t->menubg));
 	init_extended_pair(CP_HOTKEY, fit(t->hotkey), fit(t->menubg));
 	init_extended_pair(CP_HOTKEY_HL, fit(t->hotkey), fit(t->highlightbg));
+	/* selected messages in the list: the hotkey color on the background
+	 * (the text color where those are the same, or the background is the
+	 * terminal's own, which may be as dark as the hotkey color) */
+	int same = fit(t->hotkey) == fit(t->background) || t->background < 0;
+	init_extended_pair(CP_PICK, same ? fit(t->text) : fit(t->hotkey), fit(t->background));
 	/* the active window's title: its own colors, or bright white on the
 	 * highlight color made darker (the same on an 8-color terminal) */
 	int tbg = t->titlebg != THEME_AUTO ? t->titlebg

@@ -37,8 +37,8 @@ expanding more also the window with accounts will show.
 │  💡 Is envy more 261115.13:07░│                                       ░ 
 │  Fwd: Beveiligin 261115.13:04░│Uw code                                ░ 
 │  Beveiligingsmel 261115.13:03▼│KERST7                                 ▼ 
-└─L────── TAB=Folder|Accounts ─┘└─H─W─X─S─P─T─◄█░░░░░░░░░░░░░░░░░░░░░░░►┘  
-mcm@sc00by.nl  Enter Open  F5 Refresh  Q/^Q Quit
+└─L─O──── TAB=Folder|Accounts ─┘└─H─W─X─S─P─T─◄█░░░░░░░░░░░░░░░░░░░░░░░►┘  
+mcm@sc00by.nl  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 
 
 Tab                  When not all windows are shown, TAB will cycle
@@ -66,8 +66,13 @@ Shift-/Ctrl-/Alt-Space, Bksp
                      convert it with Space. Use Ctrl-Space, Alt-Space 
                      or Backspace as a alternative)
 Home / End           first / last
-Enter                open folder / read message
-Esc                  back to message list
+Enter                open folder; in the list with emails: select the
+                     message (or unselect it) and go to the next one
+Shift-Enter          select from the last message Enter selected to
+                     this one (in terminals that report Shift-Enter)
+Shift-Up / -Down     select the message and the one above / below
+Esc                  back to message list; in the list: leave the
+                     filter, else clear the selection
 
 Selections available for Message window, 
 as shown on bottom of window H W X S P T:
@@ -83,6 +88,16 @@ as shown on bottom of window H W X S P T:
 Selections available for list with emails:
                      L  Shows filter. Enter keyword, press enter.
                         Esc leaves filter.
+                     O  Opens a window with the selected messages
+                        (none selected: the one under the cursor):
+                        flags, subject, from, date/time, size.
+                        C  copy them to a folder
+                        M  move them to a folder
+                        D  delete them (move to Deleted Items;
+                           in Deleted Items: for good)
+                        Enter  unselect one   Esc  close
+                     U  Undo the last copy, move or delete (asks
+                        first; shown on the border while possible)
 
 M R F (T)               Mail / Reply / Forward (opens the editor;
                      T there attaches a file)

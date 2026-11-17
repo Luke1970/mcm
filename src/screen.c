@@ -134,11 +134,11 @@ static void draw_filter_bar(int y, int x, int w)
 {
 	const char *keys = A.fedit ? " Enter=Apply  Esc=Leave " : " L=Edit  Esc=Leave ";
 	int kw = (int)strlen(keys);
-	int avail = w - 6;                         /* right of "─L─", one line before the corner */
+	int avail = w - 10;                        /* right of "─L─O─U─", one line before the corner */
 	if (avail < 10) return;
 	if (avail - 9 - kw < 8) { keys = ""; kw = 0; }   /* narrow: the text only */
 	int fw = avail - 9 - kw - (kw ? 1 : 0);    /* the text field */
-	int x0 = x + 4;
+	int x0 = x + 8;
 	ui_puts(y, x0, " Filter:", 8, A_BOLD, CP_NORMAL);
 	ui_puts(y, x0 + 8, " ", 1, 0, CP_NORMAL);
 	/* the end of the text that fits (one column for the cursor) */
@@ -166,19 +166,26 @@ static void draw_list(int x, int y, int w, int h, int focused)
 {
 	char title[300];
 	const char *fname = A.cur_folder >= 0 ? A.folders[A.cur_folder].display : "";
+	char picked[32] = "";
+	if (pick_count()) snprintf(picked, sizeof picked, ", %d selected", pick_count());
 	if (A.fon)
-		snprintf(title, sizeof title, " %s filtered  %d of %d msgs ", fname, A.nf, A.nmsgs);
+		snprintf(title, sizeof title, " %s filtered  %d of %d msgs%s ", fname, A.nf, A.nmsgs, picked);
 	else if (A.unseen >= 0)
-		snprintf(title, sizeof title, " %s  %d msgs, %ld new ", fname, A.nmsgs, A.unseen);
+		snprintf(title, sizeof title, " %s  %d msgs, %ld new%s ", fname, A.nmsgs, A.unseen, picked);
 	else
-		snprintf(title, sizeof title, " %s  %d msgs ", fname, A.nmsgs);
+		snprintf(title, sizeof title, " %s  %d msgs%s ", fname, A.nmsgs, picked);
 	ui_box(y, x, h, w, CP_NORMAL, title, A_BOLD, focused ? CP_TITLE : CP_NORMAL);
 	A.fbar_y = y + h - 1;
 	A.fbar_x = x;
 	A.fbar_w = w;
-	/* L (filter) at the left of the bottom border, inverted while it is on */
-	if (w >= 8)
+	/* L (filter) and O (the selected messages) at the left of the bottom
+	 * border, inverted while the filter is on / messages are selected; U
+	 * only while the last copy or move can be undone */
+	if (w >= 10) {
 		ui_puts(y + h - 1, x + 2, "L", 1, A_BOLD | (A.fedit || A.fon ? A_REVERSE : 0), CP_NORMAL);
+		ui_puts(y + h - 1, x + 4, "O", 1, A_BOLD | (pick_count() ? A_REVERSE : 0), CP_NORMAL);
+		if (pick_can_undo()) ui_puts(y + h - 1, x + 6, "U", 1, A_BOLD, CP_NORMAL);
+	}
 	if (A.fedit || A.fon) {
 		draw_filter_bar(y + h - 1, x, w);
 	} else {
@@ -222,7 +229,10 @@ static void draw_list(int x, int y, int w, int h, int focused)
 			continue;
 		}
 		attr_t a = (!m->seen ? A_BOLD : 0) | (sel && !focused ? A_REVERSE : 0);
-		char flag[3] = {m->deleted ? 'D' : !m->seen ? 'N' : m->answered ? 'A' : m->flagged ? '*' : ' ', ' ', 0};
+		int picked = pick_has(m->uid);         /* selected (Enter): + and the hotkey color */
+		if (picked && pair == CP_NORMAL) pair = CP_PICK;
+		char flag[3] = {m->deleted ? 'D' : !m->seen ? 'N' : m->answered ? 'A' : m->flagged ? '*' : ' ',
+		                picked ? '+' : ' ', 0};
 		char date[32] = "";
 		if (m->date) {
 			struct tm tm;
@@ -390,6 +400,7 @@ static void draw_statusbar(void)
 	/* the message window has the focus: its vim-like ':' commands */
 	const char *msg = *A.status ? A.status
 	                  : A.focus == COL_MSG ? ":e Vim  :/text Search  :N Line  :w Save  :q Quit"
+	                  : A.focus == COL_LIST ? "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
 	                  : "Enter Open  F5 Refresh  Q/^Q Quit";
 	ui_puts(y, lw + 1, msg, COLS - lw - 1, 0, CP_MENU);
 }

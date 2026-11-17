@@ -257,35 +257,40 @@ static char *hdr_get(const char *h, size_t hlen, const char *name)
 	return NULL;
 }
 
-/* Get a parameter (e.g. charset, boundary) from a structured header value. */
-static char *param_get(const char *val, const char *name)
+/* The parameters of a structured header value ("type/sub; a=1; b=\"x y\""):
+ * attribute names and values (quotes removed) in malloc'd arrays. */
+static int params_list(const char *val, char ***attr, char ***vals)
 {
-	if (!val) return NULL;
-	size_t nl = strlen(name);
-	const char *p = strchr(val, ';');
-
+	int n = 0;
+	*attr = *vals = NULL;
+	const char *p = val ? strchr(val, ';') : NULL;
 	while (p) {
 		p++;
+		while (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') p++;
+		const char *an = p;
+		while (*p && *p != '=' && *p != ';' && *p != ' ' && *p != '\t') p++;
+		size_t al = (size_t)(p - an);
 		while (*p == ' ' || *p == '\t') p++;
-		if (!strncasecmp(p, name, nl)) {
-			const char *q = p + nl;
-			while (*q == ' ' || *q == '\t') q++;
-			if (*q == '=') {
-				q++;
-				while (*q == ' ' || *q == '\t') q++;
-				buf_t b = {0};
-				if (*q == '"') {
-					q++;
-					while (*q && *q != '"') {
-						if (*q == '\\' && q[1]) q++;
-						buf_addc(&b, *q++);
-					}
-				} else {
-					while (*q && *q != ';' && *q != ' ' && *q != '\t')
-						buf_addc(&b, *q++);
+		if (*p == '=' && al) {
+			p++;
+			while (*p == ' ' || *p == '\t') p++;
+			buf_t b = {0};
+			if (*p == '"') {
+				p++;
+				while (*p && *p != '"') {
+					if (*p == '\\' && p[1]) p++;
+					buf_addc(&b, *p++);
 				}
-				return buf_steal(&b);
+				if (*p == '"') p++;
+			} else {
+				while (*p && *p != ';' && *p != ' ' && *p != '\t')
+					buf_addc(&b, *p++);
 			}
+			*attr = xrealloc(*attr, sizeof **attr * (size_t)(n + 1));
+			*vals = xrealloc(*vals, sizeof **vals * (size_t)(n + 1));
+			(*attr)[n] = xstrndup(an, al);
+			(*vals)[n] = b.d ? buf_steal(&b) : xstrdup("");
+			n++;
 		}
 		/* skip to next ';' outside quotes */
 		int inq = 0;
@@ -295,6 +300,117 @@ static char *param_get(const char *val, const char *name)
 			p++;
 		}
 		p = *p ? p : NULL;
+	}
+	return n;
+}
+
+static void params_free(char **attr, char **vals, int n)
+{
+	for (int i = 0; i < n; i++) {
+		free(attr[i]);
+		free(vals[i]);
+	}
+	free(attr);
+	free(vals);
+}
+
+/* Get a parameter (e.g. charset, boundary) from a structured header value. */
+static char *param_get(const char *val, const char *name)
+{
+	char **attr, **vals, *r = NULL;
+	int n = params_list(val, &attr, &vals);
+	for (int i = 0; i < n && !r; i++)
+		if (!strcasecmp(attr[i], name)) r = xstrdup(vals[i]);
+	params_free(attr, vals, n);
+	return r;
+}
+
+/* Undo %XX (RFC 2231 extended values) into b. */
+static void pct_decode(buf_t *b, const char *s)
+{
+	for (; *s; s++) {
+		int h, l;
+		if (*s == '%' && (h = hexval((unsigned char)s[1])) >= 0 &&
+		    (l = hexval((unsigned char)s[2])) >= 0) {
+			buf_addc(b, (char)(h << 4 | l));
+			s += 2;
+		} else {
+			buf_addc(b, *s);
+		}
+	}
+}
+
+/* The first part of an extended value: "charset'language'" goes to cs. */
+static const char *ext_start(const char *v, char *cs, size_t csn)
+{
+	const char *q1 = strchr(v, '\'');
+	const char *q2 = q1 ? strchr(q1 + 1, '\'') : NULL;
+	if (!q2) return v;
+	snprintf(cs, csn, "%.*s", (int)(q1 - v), v);
+	return q2 + 1;
+}
+
+char *mime_param_decode(const char *const *attr, const char *const *vals, int n, const char *want)
+{
+	size_t wl = strlen(want);
+	const char *plain = NULL;
+	char cs[64] = "";
+	buf_t raw = {0};
+	int found = 0;
+
+	for (int i = 0; i < n; i++) {
+		if (strncasecmp(attr[i], want, wl)) continue;
+		if (!attr[i][wl]) plain = vals[i];
+		else if (!strcmp(attr[i] + wl, "*")) {             /* name*=utf-8''%C3%A9.pdf */
+			pct_decode(&raw, ext_start(vals[i], cs, sizeof cs));
+			found = 1;
+			break;
+		}
+	}
+	/* name*0=...; name*1*=... : continuations, in order (at most 100) */
+	for (int k = 0; !found && k < 100; k++) {
+		int hit = -1, enc = 0;
+		for (int i = 0; i < n && hit < 0; i++) {
+			if (strncasecmp(attr[i], want, wl) || attr[i][wl] != '*') continue;
+			const char *d = attr[i] + wl + 1;
+			if (!isdigit((unsigned char)*d) || (*d == '0' && isdigit((unsigned char)d[1]))) continue;
+			char *e;
+			if (strtol(d, &e, 10) != k) continue;
+			if (!*e) hit = i;
+			else if (e[0] == '*' && !e[1]) { hit = i; enc = 1; }
+		}
+		if (hit < 0) {
+			if (k > 0) found = 1;          /* name*0 .. name*(k-1) */
+			break;
+		}
+		const char *v = vals[hit];
+		if (enc && k == 0) v = ext_start(v, cs, sizeof cs);
+		if (enc) pct_decode(&raw, v);
+		else buf_adds(&raw, v);
+		if (k == 99) found = 1;
+	}
+	if (found && raw.len) {
+		char *u = conv_to_utf8(cs, raw.d, raw.len, NULL);
+		buf_free(&raw);
+		char *r = mime_decode_words(u);      /* (non-standard =?..?= in a continuation) */
+		free(u);
+		return r;
+	}
+	buf_free(&raw);
+	return plain && *plain ? mime_decode_words(plain) : NULL;
+}
+
+/* The decoded file name of a part: filename (Content-Disposition), else
+ * name (Content-Type), each also in RFC 2231 form. malloc'd, or NULL. */
+static char *part_name(const char *disp, const char *ct)
+{
+	const char *src[2] = {disp, ct}, *want[2] = {"filename", "name"};
+	for (int j = 0; j < 2; j++) {
+		char **attr, **vals;
+		int n = params_list(src[j], &attr, &vals);
+		char *r = mime_param_decode((const char *const *)attr, (const char *const *)vals, n, want[j]);
+		params_free(attr, vals, n);
+		if (r) return r;
 	}
 	return NULL;
 }
@@ -518,9 +634,8 @@ static void render_part(buf_t *out, const char *p, size_t len, int depth)
 		free(cs);
 		buf_free(&dec);
 	} else {
-		char *fn = param_get(disp, "filename");
-		if (!fn) fn = param_get(ct, "name");
-		char *fnd = fn ? mime_decode_words(fn) : xstrdup("(unnamed)");
+		char *fn = part_name(disp, ct);
+		char *fnd = fn ? xstrdup(fn) : xstrdup("(unnamed)");
 		size_t sz = (cte && !strcmp(cte, "base64")) ? bl * 3 / 4 : bl;
 		char hs[32];
 		mime_human_size(hs, sizeof hs, sz);
@@ -627,11 +742,10 @@ static void collect_atts(const char *p, size_t len, int depth, mime_att **out, i
 	                           mime_is_markdown(type) || !strncmp(type, "multipart/", 10))) {
 		/* shown as text */
 	} else {
-		char *fn = param_get(disp, "filename");
-		if (!fn) fn = param_get(ct, "name");
+		char *fn = part_name(disp, ct);
 		*out = xrealloc(*out, sizeof **out * (size_t)(*n + 1));
 		mime_att *a = &(*out)[(*n)++];
-		a->name = fn ? mime_decode_words(fn) : xstrdup("(unnamed)");
+		a->name = fn ? xstrdup(fn) : xstrdup("(unnamed)");
 		a->type = xstrdup(type);
 		a->data = mime_decode_cte(b, bl, cte, &a->len);
 		free(fn);

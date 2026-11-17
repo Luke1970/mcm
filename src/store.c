@@ -15,7 +15,58 @@ struct store {
 	pop3_t  *pop;
 	local_t *loc;
 	char     err[512];
+	char    *selected;         /* the folder store_select opened */
+	/* the last copy or move, for store_undo */
+	struct {
+		int       kind;        /* 0: none, 'c' copied, 'm' moved */
+		char     *src, *dst;
+		int       n;
+		uint32_t *old;         /* IMAP move that could not expunge: the originals, */
+		int       marked;      /* still in src and marked \Deleted */
+		uint32_t *uids;        /* IMAP: the copies in dst (COPYUID) ... */
+		int       nuids;
+		uint32_t  next, validity;   /* ... or the UIDNEXT dst had before */
+		char    **ids;         /* IMAP: the Message-IDs of the messages (sorted) */
+		int       nids;
+	} u;
+	char    **ids;             /* noted before a copy or move */
+	int       nids;
 };
+
+static void ids_free(char **ids, int n)
+{
+	for (int i = 0; i < n; i++) free(ids[i]);
+	free(ids);
+}
+
+static int strpcmp(const void *a, const void *b)
+{
+	return strcmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* IMAP: note the Message-IDs of the messages about to be copied or moved,
+ * to check later that undo finds the same messages. */
+static void ids_note(store_t *s, const uint32_t *uids, int n)
+{
+	ids_free(s->ids, s->nids);
+	s->ids = NULL;
+	s->nids = 0;
+	uint32_t *u;
+	if (s->im && imap_message_ids(s->im, uids, n, &s->ids, &u, &s->nids) == 0) {
+		qsort(s->ids, (size_t)s->nids, sizeof *s->ids, strpcmp);
+		free(u);
+	}
+}
+
+static void undo_clear(store_t *s)
+{
+	ids_free(s->u.ids, s->u.nids);
+	free(s->u.src);
+	free(s->u.dst);
+	free(s->u.old);
+	free(s->u.uids);
+	memset(&s->u, 0, sizeof s->u);
+}
 
 store_t *store_new(int kind)
 {
@@ -30,6 +81,9 @@ store_t *store_new(int kind)
 void store_free(store_t *s)
 {
 	if (!s) return;
+	undo_clear(s);
+	ids_free(s->ids, s->nids);
+	free(s->selected);
 	imap_free(s->im);
 	local_free(s->loc);
 	pop3_free(s->pop);
@@ -110,7 +164,11 @@ int store_list(store_t *s, folder_t **out, int *n)
 int store_select(store_t *s, const char *mbox, uint32_t *exists)
 {
 	CLR(s);
-	return s->im ? imap_select(s->im, mbox, exists) : local_select(s->loc, mbox, exists);
+	free(s->selected);
+	s->selected = NULL;
+	int rc = s->im ? imap_select(s->im, mbox, exists) : local_select(s->loc, mbox, exists);
+	if (rc == 0) s->selected = xstrdup(mbox);
+	return rc;
 }
 
 int store_fetch_headers(store_t *s, uint32_t from, uint32_t to, msg_t **out, int *n)
@@ -202,6 +260,171 @@ int store_append(store_t *s, const char *mbox, const char *flags, const char *da
 	CLR(s);
 	return s->im ? imap_append(s->im, mbox, flags, data, len)
 	             : local_append(s->loc, mbox, flags, data, len);
+}
+
+/* Remember a copy or move of n messages to dest that went (partly) well. */
+static void undo_note(store_t *s, int kind, const uint32_t *uids, int n, const char *dest, int marked)
+{
+	undo_clear(s);
+	if (!s->selected) return;
+	s->u.kind = kind;
+	s->u.src = xstrdup(s->selected);
+	s->u.dst = xstrdup(dest);
+	s->u.n = n;
+	if (s->im) {
+		imap_copied(s->im, &s->u.uids, &s->u.nuids, &s->u.next, &s->u.validity);
+		s->u.ids = s->ids;
+		s->u.nids = s->nids;
+		s->ids = NULL;
+		s->nids = 0;
+		/* cannot find the copies, or not check them */
+		if ((!s->u.nuids && !s->u.next) || s->u.nids != n) undo_clear(s);
+		else if (marked) {
+			s->u.marked = 1;
+			s->u.old = xmalloc(sizeof *uids * (size_t)n);
+			memcpy(s->u.old, uids, sizeof *uids * (size_t)n);
+		}
+	} else {
+		const char *d;
+		s->u.n = local_copies(s->loc, &d);
+		if (!s->u.n) undo_clear(s);
+	}
+}
+
+int store_copy(store_t *s, const uint32_t *uids, int n, const char *dest)
+{
+	CLR(s);
+	ids_note(s, uids, n);
+	int done, rc = s->im ? imap_copy(s->im, uids, n, dest) : local_copy(s->loc, uids, n, dest, &done);
+	if (rc == 0 || !s->im) undo_note(s, 'c', uids, n, dest, 0);
+	return rc;
+}
+
+int store_move(store_t *s, const uint32_t *uids, int n, const char *dest)
+{
+	CLR(s);
+	if (s->im) {
+		ids_note(s, uids, n);
+		int rc = imap_move(s->im, uids, n, dest);
+		if (rc >= 0) undo_note(s, 'm', uids, n, dest, rc > 0);
+		else undo_clear(s);
+		return rc;
+	}
+	int done;
+	int rc = local_copy(s->loc, uids, n, dest, &done);
+	if (done > 0 && local_remove(s->loc, uids, done) != 0) {
+		undo_note(s, 'c', uids, n, dest, 0);    /* copied, not removed: undo removes the copies */
+		return -1;
+	}
+	undo_note(s, 'm', uids, n, dest, 0);
+	return rc;
+}
+
+int store_delete(store_t *s, const uint32_t *uids, int n)
+{
+	CLR(s);
+	undo_clear(s);          /* gone for good: nothing to undo */
+	return s->im ? imap_expunge(s->im, uids, n) : local_remove(s->loc, uids, n);
+}
+
+int store_undo_info(store_t *s, int *n, const char **src, const char **dst)
+{
+	*n = s->u.n;
+	*src = s->u.src;
+	*dst = s->u.dst;
+	return s->u.kind;
+}
+
+/* IMAP: select dst and find the copies there. */
+static int find_copies(store_t *s, uint32_t **uids, int *n)
+{
+	uint32_t ex;
+	*uids = NULL;
+	*n = 0;
+	if (store_select(s, s->u.dst, &ex) != 0) return -1;
+	uint32_t v = imap_uidvalidity(s->im);
+	if (s->u.validity && v && v != s->u.validity) {
+		snprintf(s->err, sizeof s->err, "%s was recreated since: its messages have other numbers",
+		         s->u.dst);
+		return -1;
+	}
+	uint32_t *cand;
+	int ncand;
+	if (s->u.nuids) {                     /* the uids the server named (COPYUID) */
+		cand = xmalloc(sizeof *cand * (size_t)s->u.nuids);
+		memcpy(cand, s->u.uids, sizeof *cand * (size_t)s->u.nuids);
+		ncand = s->u.nuids;
+	} else if (imap_uids_from(s->im, s->u.next, &cand, &ncand) != 0) {
+		return -1;                        /* (else: all that arrived since the copy) */
+	}
+	/* the copies are the candidates with the Message-IDs noted before */
+	char **ids;
+	uint32_t *idu;
+	int nids;
+	int rc = imap_message_ids(s->im, cand, ncand, &ids, &idu, &nids);
+	free(cand);
+	if (rc != 0) return -1;
+	*uids = xmalloc(sizeof **uids * (size_t)(s->u.nids ? s->u.nids : 1));
+	int ok = 1;
+	for (int i = 0; ok && i < s->u.nids; i++) {
+		const char *want = s->u.ids[i];
+		if (i && !strcmp(want, s->u.ids[i - 1])) continue;     /* (counted already) */
+		int need = 0, have = 0;
+		for (int j = i; j < s->u.nids && !strcmp(s->u.ids[j], want); j++) need++;
+		for (int j = 0; j < nids; j++) have += !strcmp(ids[j], want);
+		if (have != need) ok = 0;         /* missing, or more than one could be it */
+		for (int j = 0; ok && j < nids; j++)
+			if (!strcmp(ids[j], want)) (*uids)[(*n)++] = idu[j];
+	}
+	ids_free(ids, nids);
+	free(idu);
+	if (ok && *n == s->u.n) return 0;
+	snprintf(s->err, sizeof s->err, "mcm cannot find the %s messages in %s by their Message-IDs: "
+	         "nothing was undone", s->u.kind == 'c' ? "copied" : "moved", s->u.dst);
+	free(*uids);
+	*uids = NULL;
+	*n = 0;
+	return -1;
+}
+
+int store_undo(store_t *s)
+{
+	CLR(s);
+	if (!s->u.kind) {
+		snprintf(s->err, sizeof s->err, "there is nothing to undo");
+		return -1;
+	}
+	int rc;
+	if (!s->im) {
+		rc = local_uncopy(s->loc, s->u.kind == 'm' ? s->u.src : NULL);
+		if (rc == 0) undo_clear(s);
+		return rc;
+	}
+	uint32_t *uids;
+	int n;
+	if (find_copies(s, &uids, &n) != 0) return -1;     /* (checked before anything changes) */
+	if (s->u.marked) {
+		/* moved without expunge: the originals are still there */
+		uint32_t ex;
+		if (store_select(s, s->u.src, &ex) != 0 ||
+		    imap_unflag(s->im, s->u.old, s->u.n, "\\Deleted") != 0 ||
+		    store_select(s, s->u.dst, &ex) != 0) {
+			free(uids);
+			return -1;
+		}
+	}
+	if (s->u.kind == 'c' || s->u.marked) rc = n ? imap_expunge(s->im, uids, n) : 0;
+	else rc = n ? imap_move(s->im, uids, n, s->u.src) : 0;
+	free(uids);
+	/* not again: the copies are gone or back (or only marked deleted, rc 1) */
+	if (rc >= 0) undo_clear(s);
+	return rc;
+}
+
+int store_create(store_t *s, const char *name)
+{
+	CLR(s);
+	return s->im ? imap_create(s->im, name) : 0;
 }
 
 /* Lower-case wide copy of UTF-8 text (malloc'd). */

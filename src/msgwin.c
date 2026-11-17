@@ -267,8 +267,10 @@ static int load_whole_message(void)
 	return -1;
 }
 
-/* Append s to b for a file name: no control characters or / \ : * ? " < > |
- * (they become _), at most max bytes, never half a UTF-8 character. */
+/* Append s to b for a file name: no control characters, no bidi controls
+ * (U+202A-202E, U+2066-2069, U+200E/F, U+061C: they can make "x<RLO>fdp.exe"
+ * look like "xexe.pdf") and no / \ : * ? " < > | (all become _), at most
+ * max bytes, never half a UTF-8 character. */
 void name_part(buf_t *b, const char *s, size_t max)
 {
 	size_t start = b->len;
@@ -279,7 +281,12 @@ void name_part(buf_t *b, const char *s, size_t max)
 		if (c >= 0xC0)
 			while (n < 4 && ((unsigned char)s[n] & 0xC0) == 0x80) n++;
 		if (b->len - start + n > max) break;
-		if (c < 32 || c == 127 || (c < 128 && strchr("/\\:*?\"<>|", c))) buf_addc(b, '_');
+		const unsigned char *u = (const unsigned char *)s;
+		int bidi = n == 3 && u[0] == 0xE2 &&
+		           ((u[1] == 0x80 && ((u[2] >= 0xAA && u[2] <= 0xAE) || u[2] == 0x8E || u[2] == 0x8F)) ||
+		            (u[1] == 0x81 && u[2] >= 0xA6 && u[2] <= 0xA9));
+		if (n == 2 && u[0] == 0xD8 && u[1] == 0x9C) bidi = 1;          /* U+061C */
+		if (bidi || c < 32 || c == 127 || (c < 128 && strchr("/\\:*?\"<>|", c))) buf_addc(b, '_');
 		else buf_add(b, s, n);
 		s += n;
 	}

@@ -7,8 +7,9 @@
  *     are subfolders;
  *   - a directory: every mbox file, Maildir and MH folder below it is a
  *     folder (subdirectories give the hierarchy), plus $MAIL as INBOX.
- * Sent and Drafts are listed even before they exist and are created by the
- * first message saved there (of the kind most folders there are).
+ * Sent, Drafts and Deleted Items (unless there is a Trash or Deleted folder)
+ * are listed even before they exist and are created by the first message
+ * saved there (of the kind most folders there are).
  *
  * Flags: a Maildir keeps them in the file names (S seen, R answered, F
  * flagged, T deleted); changes are written there. MH keeps them in the
@@ -52,5 +53,17 @@ int  local_add_flags(local_t *l, uint32_t uid, const char *flags);
 int  local_noop(local_t *l, int force);
 int  local_changes(local_t *l, uint32_t *exists, const uint32_t **expunged, int *n);
 int  local_append(local_t *l, const char *name, const char *flags, const char *data, size_t len);
+/* Copy n messages of the open folder to folder dest. *done: how many of
+ * uids were dealt with (copied, or no longer there), also after an error. */
+int  local_copy(local_t *l, const uint32_t *uids, int n, const char *dest, int *done);
+/* Remove n messages from the open folder: Maildir and MH files are deleted,
+ * the POP3 inbox's messages are deleted on the server (DELE); an mbox file
+ * is not changed (error). The removals show up in local_changes(). */
+int  local_remove(local_t *l, const uint32_t *uids, int n);
+/* The copies the last local_copy made: how many, and in which folder. */
+int  local_copies(local_t *l, const char **dest);
+/* Undo the last local_copy: remove the copies again; when back is not
+ * NULL, first put them in folder back (undoing a move; flags are kept). */
+int  local_uncopy(local_t *l, const char *back);
 
 #endif

@@ -28,6 +28,13 @@ struct imap {
 	uint32_t *exp, *exp_given;
 	int       nexp, capexp, changed;
 	net_trust trust;           /* certificate accepted for this server */
+	char     *caps;            /* CAPABILITY reply (upper case), asked once */
+	uint32_t  validity;        /* UIDVALIDITY of the selected mailbox (0: not given) */
+	/* the copies the last imap_copy/imap_move made (for undo): their uids
+	 * from COPYUID (RFC 4315), or the UIDNEXT the mailbox had before */
+	uint32_t *cu;
+	int       ncu, capcu;
+	uint32_t  cu_next, cu_valid;
 };
 
 typedef struct {
@@ -256,6 +263,44 @@ static void note_event(imap_t *im, unsigned num, const char *word)
 	}
 }
 
+/* Add the uids of a set ("4:6,9") to im->cu, up to the first space or ']'. */
+static void cu_add_set(imap_t *im, const char *p)
+{
+	while (*p && *p != ' ' && *p != ']') {
+		char *e;
+		unsigned long a = strtoul(p, &e, 10), b = a;
+		if (e == p) return;
+		if (*e == ':') {
+			p = e + 1;
+			b = strtoul(p, &e, 10);
+			if (e == p) return;
+		}
+		if (a > b) { unsigned long t = a; a = b; b = t; }
+		for (unsigned long u = a; u <= b && im->ncu < 1000000; u++) {
+			if (im->ncu == im->capcu) {
+				im->capcu = im->capcu ? im->capcu * 2 : 64;
+				im->cu = xrealloc(im->cu, sizeof *im->cu * (size_t)im->capcu);
+			}
+			im->cu[im->ncu++] = (uint32_t)u;
+		}
+		p = *e == ',' ? e + 1 : e;
+	}
+}
+
+/* Response codes mcm keeps: [UIDVALIDITY n] and [COPYUID valid src dst]. */
+static void note_code(imap_t *im, const char *s)
+{
+	const char *p = strstr(s, "[UIDVALIDITY ");
+	if (p) im->validity = (uint32_t)strtoul(p + 13, NULL, 10);
+	if (!(p = strstr(s, "[COPYUID "))) return;
+	char *e;
+	im->cu_valid = (uint32_t)strtoul(p + 9, &e, 10);
+	while (*e == ' ') e++;
+	while (*e && *e != ' ' && *e != ']') e++;     /* the source uids */
+	while (*e == ' ') e++;
+	cu_add_set(im, e);
+}
+
 /* Send a command and read until its tagged reply. The command may contain
  * literals: cmd ends in a {n} marker, and after each "+" of the server the
  * next of the nlit parts is sent (each but the last ending in another {n}). */
@@ -284,6 +329,7 @@ static int run_parts(imap_t *im, resp_t *r, const char *cmd, const char *const *
 			lit++, litlen++, nlit--;
 			continue;
 		}
+		note_code(im, buf_cstr(&b));
 		if (b.len > tl && !memcmp(b.d, tag, tl) && b.d[tl] == ' ') {
 			const char *st = b.d + tl + 1;
 			int ok = !strncasecmp(st, "OK", 2);
@@ -444,6 +490,8 @@ void imap_free(imap_t *im)
 	free(im->selected);
 	free(im->exp);
 	free(im->exp_given);
+	free(im->caps);
+	free(im->cu);
 	net_trust_free(&im->trust);
 	free(im);
 }
@@ -452,6 +500,8 @@ const char *imap_error(imap_t *im) { return im->err; }
 
 int imap_connect(imap_t *im, const char *host, const char *port)
 {
+	free(im->caps);
+	im->caps = NULL;
 	free(im->user);
 	im->user = NULL;
 	free_secret(&im->pass);
@@ -571,6 +621,7 @@ int imap_list(imap_t *im, folder_t **out, int *nout)
 				if (nis(k, "\\Noselect") || nis(k, "\\NonExistent")) fo.noselect = 1;
 				else if (nis(k, "\\Sent")) fo.special = FOLDER_SENT;
 				else if (nis(k, "\\Drafts")) fo.special = FOLDER_DRAFTS;
+				else if (nis(k, "\\Trash")) fo.special = FOLDER_TRASH;
 			}
 
 			const char *last = fo.name;
@@ -597,6 +648,7 @@ int imap_select(imap_t *im, const char *mbox, uint32_t *exists)
 	free(im->selected);
 	im->selected = NULL;
 	im->exists = 0;
+	im->validity = 0;
 
 	int rc = cmd(im, NULL, "SELECT %s", q);
 	free(q);
@@ -770,6 +822,247 @@ int imap_add_flags(imap_t *im, uint32_t uid, const char *flags)
 	return cmd(im, NULL, "UID STORE %u +FLAGS.SILENT (%s)", uid, flags);
 }
 
+/* Does the server announce capability cap (MOVE, UIDPLUS)? Asked once. */
+static int has_cap(imap_t *im, const char *cap)
+{
+	if (!im->caps) {
+		resp_t r = {0};
+		buf_t c = {0};
+		buf_adds(&c, " ");
+		if (cmd(im, &r, "CAPABILITY") == 0)
+			for (int i = 0; i < r.n; i++)
+				if (!strncasecmp(buf_cstr(&r.items[i]), "* CAPABILITY ", 13)) {
+					buf_adds(&c, r.items[i].d + 13);
+					strip_crlf(c.d);
+					c.len = strlen(c.d);
+				}
+		resp_free(&r);
+		buf_adds(&c, " ");
+		for (char *k = c.d; *k; k++) *k = (char)toupper((unsigned char)*k);
+		im->caps = buf_steal(&c);
+	}
+	char want[64];
+	snprintf(want, sizeof want, " %s ", cap);
+	return strstr(im->caps, want) != NULL;
+}
+
+/* "1:3,7,9" for uids[i..] (ascending), at most about 900 characters;
+ * returns the index after the last one used. */
+static int uid_set(buf_t *b, const uint32_t *uids, int n, int i)
+{
+	b->len = 0;
+	while (i < n && b->len < 900) {
+		int j = i;
+		while (j + 1 < n && uids[j + 1] == uids[j] + 1) j++;
+		if (b->len) buf_addc(b, ',');
+		if (j > i) buf_printf(b, "%u:%u", uids[i], uids[j]);
+		else buf_printf(b, "%u", uids[i]);
+		i = j + 1;
+	}
+	buf_cstr(b);
+	return i;
+}
+
+static int u32cmp_(const void *a, const void *b)
+{
+	uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
+	return x < y ? -1 : x > y;
+}
+
+/* Run "UID <verb> <set> <tail>" for all uids, in pieces. */
+static int uid_cmd(imap_t *im, const char *verb, const uint32_t *uids, int n, const char *tail)
+{
+	uint32_t *u = xmalloc(sizeof *u * (size_t)(n ? n : 1));
+	memcpy(u, uids, sizeof *u * (size_t)n);
+	qsort(u, (size_t)n, sizeof *u, u32cmp_);
+	buf_t set = {0};
+	int rc = 0;
+	for (int i = 0; i < n && rc == 0;) {
+		i = uid_set(&set, u, n, i);
+		rc = cmd(im, NULL, "UID %s %s%s%s", verb, set.d, *tail ? " " : "", tail);
+	}
+	buf_free(&set);
+	free(u);
+	return rc;
+}
+
+/* Before copying to mbox: forget the last copies; without UIDPLUS (no
+ * COPYUID) note the UIDNEXT of mbox, to find the copies by later. */
+static void copy_start(imap_t *im, const char *mbox)
+{
+	im->ncu = 0;
+	im->cu_next = im->cu_valid = 0;
+	if (has_cap(im, "UIDPLUS")) return;
+	resp_t r = {0};
+	char *q = quote(mbox);
+	if (cmd(im, &r, "STATUS %s (UIDNEXT UIDVALIDITY)", q) == 0)
+		for (int i = 0; i < r.n; i++) {
+			node_t *t = parse_resp(&r.items[i]);
+			if (nis(t, "*") && nis(t->next, "STATUS"))
+				for (node_t *k = t->next->next; k; k = k->next)
+					if (k->t == N_LIST)
+						for (node_t *a = k->kid; a && a->next; a = a->next->next) {
+							uint32_t v = (uint32_t)strtoul(nstr(a->next), NULL, 10);
+							if (nis(a, "UIDNEXT")) im->cu_next = v;
+							else if (nis(a, "UIDVALIDITY")) im->cu_valid = v;
+						}
+			nfree(t);
+		}
+	resp_free(&r);
+	free(q);
+}
+
+static int copy_to(imap_t *im, const char *verb, const uint32_t *uids, int n, const char *mbox)
+{
+	char *q = quote(mbox);
+	int rc = uid_cmd(im, verb, uids, n, q);
+	free(q);
+	return rc;
+}
+
+int imap_copy(imap_t *im, const uint32_t *uids, int n, const char *mbox)
+{
+	copy_start(im, mbox);
+	return copy_to(im, "COPY", uids, n, mbox);
+}
+
+int imap_expunge(imap_t *im, const uint32_t *uids, int n)
+{
+	if (uid_cmd(im, "STORE", uids, n, "+FLAGS.SILENT (\\Deleted)") != 0) return -1;
+	if (!has_cap(im, "UIDPLUS")) {
+		/* a plain EXPUNGE would also remove other messages marked deleted */
+		seterr(im, "the server cannot remove single messages (no UIDPLUS): "
+		           "they are marked deleted (D)");
+		return 1;
+	}
+	return uid_cmd(im, "EXPUNGE", uids, n, "");
+}
+
+int imap_move(imap_t *im, const uint32_t *uids, int n, const char *mbox)
+{
+	copy_start(im, mbox);
+	if (has_cap(im, "MOVE")) return copy_to(im, "MOVE", uids, n, mbox);
+	if (copy_to(im, "COPY", uids, n, mbox) != 0) return -1;
+	return imap_expunge(im, uids, n);
+}
+
+void imap_copied(imap_t *im, uint32_t **uids, int *n, uint32_t *next, uint32_t *validity)
+{
+	*uids = NULL;
+	*n = 0;
+	if (im->ncu) {
+		*uids = xmalloc(sizeof **uids * (size_t)im->ncu);
+		memcpy(*uids, im->cu, sizeof **uids * (size_t)im->ncu);
+		*n = im->ncu;
+	}
+	*next = im->ncu ? 0 : im->cu_next;
+	*validity = im->cu_valid;
+}
+
+uint32_t imap_uidvalidity(imap_t *im) { return im->validity; }
+
+int imap_uids_from(imap_t *im, uint32_t next, uint32_t **out, int *nout)
+{
+	*out = NULL;
+	*nout = 0;
+	resp_t r = {0};
+	if (cmd(im, &r, "UID SEARCH UID %u:*", next) != 0) {
+		resp_free(&r);
+		return -1;
+	}
+	uint32_t *v = NULL;
+	int n = 0;
+	for (int i = 0; i < r.n; i++) {
+		const char *p = buf_cstr(&r.items[i]);
+		if (strncasecmp(p, "* SEARCH", 8)) continue;
+		for (p += 8; *p;) {
+			char *e;
+			unsigned long u = strtoul(p, &e, 10);
+			if (e == p) { p++; continue; }
+			p = e;
+			if (u < next) continue;     /* "n:*" also matches the highest uid below n */
+			v = xrealloc(v, sizeof *v * (size_t)(n + 1));
+			v[n++] = (uint32_t)u;
+		}
+	}
+	resp_free(&r);
+	*out = v;
+	*nout = n;
+	return 0;
+}
+
+int imap_message_ids(imap_t *im, const uint32_t *uids, int n, char ***out, uint32_t **outu, int *nout)
+{
+	*out = NULL;
+	*outu = NULL;
+	*nout = 0;
+	if (n <= 0) return 0;
+	uint32_t *u = xmalloc(sizeof *u * (size_t)(n ? n : 1));
+	memcpy(u, uids, sizeof *u * (size_t)n);
+	qsort(u, (size_t)n, sizeof *u, u32cmp_);
+	buf_t set = {0};
+	char **ids = NULL;
+	uint32_t *idu = NULL;
+	int k = 0, rc = 0;
+	for (int i = 0; i < n && rc == 0;) {
+		i = uid_set(&set, u, n, i);
+		resp_t r = {0};
+		if ((rc = cmd(im, &r, "UID FETCH %s (UID ENVELOPE)", set.d)) == 0)
+			for (int j = 0; j < r.n; j++) {
+				node_t *t = parse_resp(&r.items[j]);
+				node_t *kw = t && t->next ? t->next->next : NULL;
+				node_t *list = kw ? kw->next : NULL;
+				if (nis(t, "*") && nis(kw, "FETCH") && list && list->t == N_LIST) {
+					uint32_t uid = 0;
+					node_t *envl = NULL;
+					for (node_t *a = list->kid; a && a->next; a = a->next->next) {
+						if (nis(a, "UID")) uid = (uint32_t)strtoul(nstr(a->next), NULL, 10);
+						else if (nis(a, "ENVELOPE") && a->next->t == N_LIST) envl = a->next;
+					}
+					if (uid && envl) {
+						/* (date subject from sender reply-to to cc bcc in-reply-to message-id) */
+						node_t *e = envl->kid;
+						for (int f = 0; f < 9 && e; f++) e = e->next;
+						ids = xrealloc(ids, sizeof *ids * (size_t)(k + 1));
+						idu = xrealloc(idu, sizeof *idu * (size_t)(k + 1));
+						idu[k] = uid;
+						ids[k++] = xstrdup(e ? nstr(e) : "");
+					}
+				}
+				nfree(t);
+			}
+		resp_free(&r);
+	}
+	buf_free(&set);
+	free(u);
+	if (rc != 0) {
+		for (int i = 0; i < k; i++) free(ids[i]);
+		free(ids);
+		free(idu);
+		return -1;
+	}
+	*out = ids;
+	*outu = idu;
+	*nout = k;
+	return 0;
+}
+
+int imap_unflag(imap_t *im, const uint32_t *uids, int n, const char *flags)
+{
+	char tail[96];
+	snprintf(tail, sizeof tail, "-FLAGS.SILENT (%s)", flags);
+	return uid_cmd(im, "STORE", uids, n, tail);
+}
+
+int imap_create(imap_t *im, const char *mbox)
+{
+	char *q = quote(mbox);
+	int rc = cmd(im, NULL, "CREATE %s", q);
+	if (rc == 0) cmd(im, NULL, "SUBSCRIBE %s", q);
+	free(q);
+	return rc;
+}
+
 const char *imap_password(imap_t *im) { return im->pass ? im->pass : ""; }
 
 int imap_noop(imap_t *im)
@@ -798,6 +1091,20 @@ static const node_t *nth(const node_t *n, int i)
 {
 	while (n && i-- > 0) n = n->next;
 	return n;
+}
+
+/* Parameter `want` of a BODYSTRUCTURE parameter list ("NAME" "x.pdf" ...),
+ * decoded (RFC 2047 or RFC 2231). malloc'd, or NULL. */
+static char *bs_param(const node_t *list, const char *want)
+{
+	if (!list || list->t != N_LIST) return NULL;
+	const char *attr[64], *vals[64];
+	int n = 0;
+	for (const node_t *a = list->kid; a && a->next && n < 64; a = a->next->next) {
+		attr[n] = nstr(a);
+		vals[n++] = nstr(a->next);
+	}
+	return mime_param_decode(attr, vals, n, want);
 }
 
 static void bs_parse(const node_t *list, const char *sec, mpart_t *p, int depth)
@@ -831,14 +1138,11 @@ static void bs_parse(const node_t *list, const char *sec, mpart_t *p, int depth)
 	str_lower(p->type);
 	str_lower(p->subtype);
 
-	const char *name = NULL;
 	const node_t *params = nth(k, 2);
 	if (params && params->t == N_LIST)
 		for (const node_t *a = params->kid; a && a->next; a = a->next->next) {
 			if (!strcasecmp(nstr(a), "CHARSET"))
 				snprintf(p->charset, sizeof p->charset, "%s", nstr(a->next));
-			else if (!strcasecmp(nstr(a), "NAME"))
-				name = nstr(a->next);
 			else if (!strcasecmp(nstr(a), "FORMAT"))
 				p->flowed = !strcasecmp(nstr(a->next), "flowed");
 			else if (!strcasecmp(nstr(a), "DELSP"))
@@ -854,12 +1158,9 @@ static void bs_parse(const node_t *list, const char *sec, mpart_t *p, int depth)
 	const node_t *d = nth(k, di);
 	if (d && d->t == N_LIST && d->kid) {
 		if (!strcasecmp(nstr(d->kid), "attachment")) p->attachment = 1;
-		const node_t *dp = d->kid->next;
-		if (dp && dp->t == N_LIST)
-			for (const node_t *a = dp->kid; a && a->next; a = a->next->next)
-				if (!strcasecmp(nstr(a), "FILENAME")) name = nstr(a->next);
+		p->name = bs_param(d->kid->next, "filename");    /* also RFC 2231 */
 	}
-	if (name && *name) p->name = mime_decode_words(name);
+	if (!p->name) p->name = bs_param(params, "name");
 }
 
 int imap_fetch_structure(imap_t *im, uint32_t uid, char **hdr, size_t *hlen, mpart_t **root)

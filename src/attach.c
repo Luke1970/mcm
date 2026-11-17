@@ -70,11 +70,27 @@ static int att_runnable(const char *name)
 		"exe", "com", "bat", "cmd", "scr", "pif", "msi", "msp", "cpl", "dll", "js", "jse", "vbs",
 		"vbe", "wsf", "wsh", "ps1", "psm1", "hta", "lnk", "url", "reg", "jar", "appref-ms",
 		"sh", "bash", "csh", "zsh", "run", "bin", "desktop", "appimage", "deb", "rpm", "py",
-		"pl", "rb", "command", "app", "pkg", "iso", "img", NULL};
-	const char *dot = strrchr(name, '.');
-	if (!dot) return 0;
+		"pl", "rb", "command", "app", "pkg", "iso", "img",
+		/* opened in the browser as a local file, where scripts run */
+		"html", "htm", "xhtml", "shtml", "mht", "mhtml", "svg", "svgz", "xsl", "xslt",
+		/* Office files with macros */
+		"docm", "dotm", "xlsm", "xltm", "xlam", "xll", "pptm", "potm", "ppam", "ppsm", "sldm",
+		/* other Windows types used in attacks */
+		"chm", "msc", "one", "onepkg", "vhd", "vhdx", "inf", "sys", "application", "gadget",
+		"settingcontent-ms", "library-ms", "search-ms", "searchconnector-ms", "diagcab",
+		"appx", "msix", "appxbundle", "msixbundle", "ws", "wsc", "sct", "ade", "adp", "mde",
+		"accde", "cer", "crt", "der", "website", "theme", "themepack", "scf", "xbap",
+		NULL};
+	/* The extension as it will be on disk (after att_filename has made the
+	 * name safe), not as written in the mail: "x.exe " would else pass the
+	 * check and still be saved as x.exe. */
+	buf_t b = {0};
+	char e[32];
+	att_filename(&b, name, e, sizeof e);
+	buf_free(&b);
+	if (!*e) return 0;
 	for (int i = 0; ext[i]; i++)
-		if (!strcasecmp(dot + 1, ext[i])) return 1;
+		if (!strcasecmp(e + 1, ext[i])) return 1;
 	return 0;
 }
 
@@ -260,7 +276,7 @@ void attachments(void)
 		buf_t path = {0};
 		if (c == 0) {                                    /* Open */
 			if (att_runnable(a[sel].name)) {
-				set_status("%s is a program file: mcm does not open those, use Save", a[sel].name);
+				set_status("%s can run code: mcm does not open such files, use Save", a[sel].name);
 				break;
 			}
 			if (att_dir(dir, sizeof dir) != 0) {

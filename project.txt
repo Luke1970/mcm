@@ -273,13 +273,13 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.974 Quit Mail Reply Forward Account Config F1=Help  date time
+  mcm 0.979 Quit Mail Reply Forward Account Config F1=Help  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
   |                                      <>Hello,                        v
-  +-L-- TAB=Folder|Accounts  PgUp/PgDn -++-H-W-X-S-P-T------------ Spc=PgDn B=PgUp -+
-   user@host  Enter Open  F5 Refresh  Q/^Q Quit
+  +-L-O-- TAB=Folder|Accounts  PgUp/PgDn -++-H-W-X-S-P-T---------- Spc=PgDn B=PgUp -+
+   user@host  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 
 - Top line: menu bar with the context menu and the clock on the right.
   Hotkey letters in the HOTKEY color. A click on an item runs it. (Header
@@ -297,10 +297,65 @@ Local (src/local.c):
   every message, until :noh.
 - ui_run_editor() (ui.c): $VISUAL/$EDITOR via sh -c "exec $0 $2 \"$1\""
   (Windows win_run), SIGINT ignored meanwhile; also used by the editor's :e.
-- Status line: "Enter Open  F5 Refresh  Q/^Q Quit" in every layout (no
-  F1, Tab, column or L hint: F1=Help is in the menu bar, L on the list's
-  border). With the focus on the message window it shows the ':' commands
-  instead: ":e Vim  :/text Search  :N Line  :w Save  :q Quit".
+- Status line: "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
+  with the focus on the email list, "Enter Open  F5 Refresh  Q/^Q Quit" on
+  the folders and accounts (no F1, Tab, column or L/O hint: F1=Help is in
+  the menu bar, L, O and U on the list's border). With the focus on the
+  message window it shows the ':' commands instead:
+  ":e Vim  :/text Search  :N Line  :w Save  :q Quit".
+- Selected messages (pick.c, 0.977): Enter in the list toggles the message
+  under the cursor and moves down; Shift-Enter (ui_key_senter: CSI 13;2u,
+  CSI 27;2;13~) selects from the anchor (the last Enter) to the cursor;
+  Shift-Up/Down (KEY_SR/KEY_SF, PDCurses KEY_SUP/KEY_SDOWN) select while
+  moving. The selection is a list of msg_t copies keyed by uid (msg_load()
+  reads a header block that is not cached); cleared by Esc, opening a folder
+  or switching account. Shown with '+' in CP_PICK (hotkey color on the
+  background; the text color when that is the same or the terminal's own
+  background). List title "..., N selected"; O on the list border at x+2,
+  inverted while there is a selection; U at x+6 while there is something to
+  undo (the filter bar starts at x+8).
+- O: pick_window() covers rows 1..LINES-2: Flag (SAFD) Subject From
+  Date (%Y-%m-%d %H:%M) Size (bytes / kB / MB, 1000-based), newest first.
+  C copy / M move (ui_list_dialog of the account's folders, full paths,
+  the open one left out), D delete = move to the trash folder (\Trash
+  special-use, else Deleted Items / Trash / Deleted / Deleted Messages;
+  IMAP: offer CREATE (+SUBSCRIBE) "Deleted Items", under INBOX<delim> when all
+  folders are; local: a virtual Deleted Items like Sent/Drafts unless a
+  Trash/Deleted folder exists); in the trash folder itself D asks and
+  expunges. Uids are passed oldest first. Afterwards sync_changes() and
+  cache_clear(), selection cleared.
+- store_copy/move/delete/create: IMAP UID COPY, UID MOVE (CAPABILITY MOVE,
+  asked once per connection), else COPY + STORE \Deleted + UID EXPUNGE
+  (UIDPLUS); without UIDPLUS only the \Deleted mark (rc 1, no plain
+  EXPUNGE). Uid sets compressed (1:3,7), commands split at ~900 chars.
+  Local: local_copy (load_raw + local_append with \Seen \Answered
+  \Flagged), local_remove (Maildir/MH unlink, MH replied/flagged sequences
+  updated; POP3 DELE then pop3_reconnect = QUIT commits; mbox refused),
+  then scan + merge so the removals come out of local_changes().
+- Undo (U, 0.978): store.c keeps the last copy/move (kind, src, dst, n);
+  store_delete (for good) and a failed action clear it, and it lives in the
+  store, so switching account drops it. pick_undo() asks (ui_confirm),
+  store_undo() works in dst (it leaves another folder selected), then
+  reopen_folder() selects the open folder again, keeping filter and cursor.
+  IMAP: before COPY/MOVE the Message-IDs (UID FETCH ENVELOPE) are noted;
+  copy_start() resets the COPYUID list and, without UIDPLUS, notes STATUS
+  UIDNEXT/UIDVALIDITY of dst. run_parts() catches [COPYUID v src dst]
+  (untagged with MOVE, tagged with COPY) and [UIDVALIDITY v]. Undo: SELECT
+  dst (UIDVALIDITY must match), candidates = the COPYUID uids or UID SEARCH
+  UID next:* (>= next), keep those whose Message-ID is a noted one; every
+  noted ID must match exactly as often as noted, else nothing is done. Then
+  copy: STORE \Deleted + UID EXPUNGE; move: UID MOVE back (or COPY +
+  expunge); a move that was only marked (no UIDPLUS): -FLAGS \Deleted on
+  the originals, copies marked \Deleted (rc 1).
+  Local: the append functions note what they wrote (l->wrote; mbox: size
+  before, offsets after the padding, end); local_copy keeps the list.
+  local_uncopy(back): Maildir copies found by name (or by the part before
+  ":2," when renamed), MH by number (sequences cleared); with back the
+  file is read and appended there with its (current Maildir) flags first;
+  mbox: only when its size is still the noted end: each message read back
+  (From_ and Status: lines and the closing blank line dropped, mboxrd
+  quoting undone), then ftruncate to the size before. POP3 inbox as back:
+  refused (DELE is final).
 - Menu bar items are 2 columns apart (ui_menubar, ui_menu_hit); the clock
   keeps at least 2 columns from the last item (on 80 columns it moves to
   the right edge, so it still fits).
@@ -376,8 +431,14 @@ Main screen:
   Up / Down            move selection / scroll the message
   PgUp / PgDn          page the list
   Home / End           first / last
-  Enter                open folder / read message
-  Esc                  back to the email list
+  Enter                open folder; in the list: select / unselect the
+                       message and go to the next one
+  Shift-Enter          select from the last Enter to here
+  Shift-Up / -Down     select while moving
+  O                    the selected messages: C copy, M move, D delete
+  U                    undo the last copy / move / delete (asks first)
+  Esc                  back to the email list; in the list: leave the
+                       filter, else clear the selection
   Space                page down in the message, from every window
   Shift-Space, Ctrl-Space, Alt-Space, Backspace
                        page up in the message, from every window

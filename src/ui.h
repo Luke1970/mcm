@@ -36,14 +36,18 @@ int  ui_get_wch(wint_t *wc);
 extern int ui_key_cleft, ui_key_cright;
 /* Shift-Space, for terminals that report it (kitty, xterm modifyOtherKeys). */
 extern int ui_key_sspace;
+/* Shift-Enter, for terminals that report it (kitty, foot, WezTerm, xterm
+ * with modifyOtherKeys); elsewhere it arrives as Enter. */
+extern int ui_key_senter;
 
 /* While dragging with the mouse: also report movement with the button held
  * (on = 1 at the press, 0 at the release). */
 void ui_mouse_drag(int on);
 
 enum { CP_NORMAL = 1, CP_HIGHLIGHT, CP_MENU, CP_HOTKEY, CP_HOTKEY_HL,
-       CP_TITLE, CP_HEADER };   /* CP_TITLE: title of the active window;
-                                   CP_HEADER: headers in the message window */
+       CP_TITLE, CP_HEADER, CP_PICK };   /* CP_TITLE: title of the active window;
+                                   CP_HEADER: headers in the message window;
+                                   CP_PICK: selected messages in the list */
 
 typedef void (*ui_bg_fn)(void);   /* redraws the screen behind a dialog */
 

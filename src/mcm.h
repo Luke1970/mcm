@@ -51,7 +51,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.974"
+#define MCM_VERSION   "0.979"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -223,7 +223,20 @@ void refresh_folder(int quiet);
 int work_pending(void);
 void do_work(void);
 void filter_edit(void);
+void reopen_folder(void);
 int nrows(void);
+msg_t *msg_load(int i);
+
+/* pick.c */
+int pick_count(void);
+int pick_has(uint32_t uid);
+void pick_clear(void);
+void pick_toggle(void);
+void pick_range(void);
+void pick_extend(int dir);
+void pick_window(void);
+int pick_can_undo(void);
+void pick_undo(void);
 
 /* msgwin.c */
 void close_message(void);

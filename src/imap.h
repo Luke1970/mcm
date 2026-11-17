@@ -20,7 +20,7 @@ typedef struct {
 	int   special;   /* FOLDER_SENT / FOLDER_DRAFTS from RFC 6154 attributes, or 0 */
 } folder_t;
 
-enum { FOLDER_SENT = 1, FOLDER_DRAFTS = 2 };
+enum { FOLDER_SENT = 1, FOLDER_DRAFTS = 2, FOLDER_TRASH = 3 };
 
 typedef struct {
 	uint32_t seq, uid, size;
@@ -78,6 +78,28 @@ int  imap_fetch_structure(imap_t *im, uint32_t uid, char **hdr, size_t *hlen, mp
 int  imap_fetch_partial(imap_t *im, uint32_t uid, imap_partial_t *req, int n);
 int  imap_mark_seen(imap_t *im, uint32_t uid);
 int  imap_add_flags(imap_t *im, uint32_t uid, const char *flags);   /* e.g. "\\Answered" */
+/* Copy, move or remove n messages of the selected mailbox (by uid). Move
+ * uses MOVE (RFC 6851) when the server has it, else COPY and expunge.
+ * imap_expunge removes only these messages (UID EXPUNGE, RFC 4315); without
+ * UIDPLUS they are only marked \Deleted and 1 is returned (error set).
+ * Expunges show up in imap_changes(). */
+int  imap_copy(imap_t *im, const uint32_t *uids, int n, const char *mbox);
+int  imap_move(imap_t *im, const uint32_t *uids, int n, const char *mbox);
+int  imap_expunge(imap_t *im, const uint32_t *uids, int n);
+int  imap_create(imap_t *im, const char *mbox);
+/* To undo the last imap_copy/imap_move: the uids of the copies (COPYUID,
+ * RFC 4315; malloc'd), or, from a server without UIDPLUS, *uids NULL and
+ * the UIDNEXT the mailbox had before (0: unknown); and its UIDVALIDITY. */
+void imap_copied(imap_t *im, uint32_t **uids, int *n, uint32_t *next, uint32_t *validity);
+/* UIDVALIDITY of the selected mailbox (0: the server did not say). */
+uint32_t imap_uidvalidity(imap_t *im);
+/* The uids from next on in the selected mailbox (malloc'd). */
+int  imap_uids_from(imap_t *im, uint32_t next, uint32_t **uids, int *n);
+/* The Message-IDs of n messages of the selected mailbox ("" for one
+ * without), and whose they are (uid); malloc'd, in no particular order. */
+int  imap_message_ids(imap_t *im, const uint32_t *uids, int n, char ***ids, uint32_t **iduids, int *nids);
+/* Remove flags (e.g. "\\Deleted") from n messages of the selected mailbox. */
+int  imap_unflag(imap_t *im, const uint32_t *uids, int n, const char *flags);
 /* The login password (kept in memory for reconnects; offered for SMTP). */
 const char *imap_password(imap_t *im);
 int  imap_noop(imap_t *im);

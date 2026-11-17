@@ -86,6 +86,20 @@ struct local {
 	uint32_t *exp, *exp_given;
 	int       nexp, changed;
 
+	/* set by the append functions: the file written (Maildir, MH), or
+	 * where the message went in an mbox file (wbefore: its size before) */
+	char     *wrote;
+	long long wbefore, wfrom, wto;
+	/* what the last local_copy wrote, for local_uncopy */
+	struct lcopy {
+		char     *file;        /* Maildir, MH: the copy; NULL: mbox */
+		long long from, to;    /* mbox: the message (after the From_ line's padding) */
+		char      flags[40];
+	} *cp;
+	int       ncp;
+	char     *cp_dest;
+	long long cp_before;       /* mbox: its size before the first copy */
+
 	/* the last message read whole */
 	uint32_t  raw_uid;
 	buf_t     raw;
@@ -217,9 +231,21 @@ local_t *local_new(void)
 	return l;
 }
 
+static void cp_clear(local_t *l)
+{
+	for (int i = 0; i < l->ncp; i++) free(l->cp[i].file);
+	free(l->cp);
+	l->cp = NULL;
+	l->ncp = 0;
+	free(l->cp_dest);
+	l->cp_dest = NULL;
+}
+
 void local_free(local_t *l)
 {
 	if (!l) return;
+	cp_clear(l);
+	free(l->wrote);
 	close_folder(l);
 	folders_clear(l);
 	free(l->exp_given);
@@ -489,9 +515,11 @@ static void scan_folders(local_t *l)
 		add_folder(l, l->pop ? "Local" : "INBOX", root, LF_MBOX, '/');
 	}
 	if (new_kind >= 0) {
-		static const char *const want[] = {"Sent", "Drafts"};
-		for (int i = 0; i < 2; i++) {
-			if (name_used(l, want[i])) continue;
+		static const char *const want[] = {"Sent", "Drafts", "Deleted Items"};
+		int have_trash = name_used(l, "Trash") || name_used(l, "Deleted") ||
+		                 name_used(l, "Deleted Messages");
+		for (int i = 0; i < 3; i++) {
+			if (name_used(l, want[i]) || (i == 2 && have_trash)) continue;
 			char *p;
 			if (sub_delim == '.') {
 				char dot[16];
@@ -529,6 +557,8 @@ int local_list(local_t *l, folder_t **out, int *nout)
 		f[i].noselect = x->kind == LF_DIR;
 		if (!strcasecmp(x->name, "Sent")) f[i].special = FOLDER_SENT;
 		if (!strcasecmp(x->name, "Drafts")) f[i].special = FOLDER_DRAFTS;
+		if (!strcasecmp(x->name, "Deleted Items") || !strcasecmp(x->name, "Trash"))
+			f[i].special = FOLDER_TRASH;
 	}
 	*out = f;
 	*nout = l->nf;
@@ -1385,6 +1415,265 @@ int local_changes(local_t *l, uint32_t *exists, const uint32_t **expunged, int *
 }
 
 /* ------------------------------------------------------------------ */
+/* Copying and removing messages                                       */
+
+int local_copy(local_t *l, const uint32_t *uids, int n, const char *dest, int *done)
+{
+	*done = 0;
+	const lfolder *f = cur(l);
+	if (!f) {
+		seterr(l, "no folder open");
+		return -1;
+	}
+	if (!strcmp(f->name, dest)) {
+		seterr(l, "the messages are in %s already", dest);
+		return -1;
+	}
+	cp_clear(l);
+	l->cp_dest = xstrdup(dest);
+	for (int i = 0; i < n; i++) {
+		lmsg *m = by_uid(l, uids[i]);
+		if (!m) { (*done)++; continue; }          /* gone meanwhile */
+		if (load_raw(l, uids[i]) != 0) return -1;
+		char flags[40] = "";
+		if (m->seen) strcat(flags, "\\Seen ");
+		if (m->answered) strcat(flags, "\\Answered ");
+		if (m->flagged) strcat(flags, "\\Flagged ");
+		free(l->wrote);
+		l->wrote = NULL;
+		if (local_append(l, dest, flags, l->raw.d, l->raw.len) != 0) return -1;
+		(*done)++;
+		l->cp = xrealloc(l->cp, sizeof *l->cp * (size_t)(l->ncp + 1));
+		struct lcopy *c = &l->cp[l->ncp++];
+		c->file = l->wrote;                    /* NULL: appended to an mbox file */
+		l->wrote = NULL;
+		c->from = l->wfrom;
+		c->to = l->wto;
+		snprintf(c->flags, sizeof c->flags, "%s", flags);
+		if (l->ncp == 1) l->cp_before = l->wbefore;
+	}
+	return 0;
+}
+
+/* A Maildir copy may have been renamed since (flags, new/ -> cur/): find
+ * it by the part of its name before the flags. NULL: it is gone. */
+static char *find_copy(const lfolder *d, const char *file)
+{
+	if (access(file, F_OK) == 0) return xstrdup(file);
+	if (d->kind != LF_MAILDIR) return NULL;
+	const char *b = strrchr(file, '/');
+	b = b ? b + 1 : file;
+	size_t bl = strcspn(b, MD_SEPSTR);
+	static const char *const sub[] = {"cur", "new"};
+	for (int i = 0; i < 2; i++) {
+		char *dir = path_join(d->path, sub[i]);
+		DIR *dd = opendir(dir);
+		struct dirent *e;
+		char *hit = NULL;
+		while (dd && !hit && (e = readdir(dd)))
+			if (!strncmp(e->d_name, b, bl) && (!e->d_name[bl] || strchr(MD_SEPSTR, e->d_name[bl])))
+				hit = path_join(dir, e->d_name);
+		if (dd) closedir(dd);
+		free(dir);
+		if (hit) return hit;
+	}
+	return NULL;
+}
+
+/* The flags in a Maildir file name ("...:2,FRS") as IMAP flags. */
+static void name_flags(const char *file, char *out, size_t n)
+{
+	const char *i = strstr(file, MD_INFO);
+	if (!i) return;
+	i += strlen(MD_INFO);
+	snprintf(out, n, "%s%s%s", strchr(i, 'S') ? "\\Seen " : "", strchr(i, 'R') ? "\\Answered " : "",
+	         strchr(i, 'F') ? "\\Flagged " : "");
+}
+
+static int read_range(const char *path, long long from, long long to, buf_t *out)
+{
+	FILE *fp = fopen(path, "rb");
+	if (!fp) return -1;
+	if (from && fseeko(fp, (off_t)from, SEEK_SET) != 0) {
+		fclose(fp);
+		return -1;
+	}
+	char tmp[16384];
+	size_t got;
+	long long left = to < 0 ? -1 : to - from;
+	while (left && (got = fread(tmp, 1, left > 0 && left < (long long)sizeof tmp ? (size_t)left : sizeof tmp,
+	                            fp)) > 0) {
+		buf_add(out, tmp, got);
+		if (left > 0) left -= (long long)got;
+	}
+	int err = ferror(fp);
+	fclose(fp);
+	return err ? -1 : 0;
+}
+
+int local_copies(local_t *l, const char **dest)
+{
+	*dest = l->cp_dest;
+	return l->ncp;
+}
+
+int local_uncopy(local_t *l, const char *back)
+{
+	if (!l->ncp) {
+		seterr(l, "there is nothing to undo");
+		return -1;
+	}
+	lfolder *d = find_folder(l, l->cp_dest);
+	if (!d) {
+		seterr(l, "there is no folder %s any more", l->cp_dest);
+		return -1;
+	}
+	if (back) {
+		const lfolder *b = find_folder(l, back);
+		if (!b) {
+			seterr(l, "there is no folder %s any more", back);
+			return -1;
+		}
+		if (b->kind == LF_POP3) {
+			seterr(l, "the messages were deleted from the POP3 server and cannot be put back "
+			          "there: they stay in %s", l->cp_dest);
+			return -1;
+		}
+	}
+	int mbox = !l->cp[0].file;
+	if (mbox) {
+		struct stat st;
+		if (stat(d->path, &st) != 0 || (long long)st.st_size != l->cp[l->ncp - 1].to) {
+			seterr(l, "%s has changed since: the copies stay in it", l->cp_dest);
+			return -1;
+		}
+	}
+	int rc = 0, i;
+	for (i = 0; i < l->ncp && rc == 0; i++) {
+		struct lcopy *c = &l->cp[i];
+		char *path = mbox ? NULL : find_copy(d, c->file);
+		if (!mbox && !path) continue;                /* removed meanwhile */
+		if (back) {
+			buf_t m = {0};
+			char flags[40];
+			snprintf(flags, sizeof flags, "%s", c->flags);
+			if (mbox) {
+				rc = read_range(d->path, c->from, c->to, &m);
+				/* drop the From_ and Status: lines and the blank line after the
+				 * message that append_mbox added, and its quoting */
+				size_t at = 0;
+				for (int k = 0; k < 2 && at < m.len; k++) {
+					const char *nl = memchr(m.d + at, '\n', m.len - at);
+					at = nl ? (size_t)(nl - m.d) + 1 : m.len;
+				}
+				memmove(m.d, m.d + at, m.len - at);
+				m.len -= at;
+				if (m.len && m.d[m.len - 1] == '\n') m.len--;
+				unquote_from(&m);
+			} else {
+				rc = read_range(path, 0, -1, &m);
+				if (d->kind == LF_MAILDIR) name_flags(path, flags, sizeof flags);
+			}
+			if (rc != 0) seterr(l, "cannot read %s: %s", mbox ? d->path : path, strerror(errno));
+			else rc = local_append(l, back, flags, m.d ? m.d : "", m.len);
+			buf_free(&m);
+		}
+		if (rc == 0 && path) {
+			if (unlink(path) != 0 && errno != ENOENT) {
+				seterr(l, "cannot remove %s: %s", path, strerror(errno));
+				rc = -1;
+			} else if (d->kind == LF_MH) {
+				const char *b = strrchr(path, '/');
+				int v = atoi(b ? b + 1 : path);
+				seq_update(l, d->path, "unseen", v, 0);
+				seq_update(l, d->path, "replied", v, 0);
+				seq_update(l, d->path, "flagged", v, 0);
+			}
+		}
+		free(path);
+	}
+	if (rc == 0 && mbox) {
+		int fd = open(d->path, O_WRONLY);
+		if (fd < 0 || ftruncate(fd, (off_t)l->cp_before) != 0) {
+			seterr(l, "cannot shorten %s: %s", d->path, strerror(errno));
+			rc = -1;
+		}
+		if (fd >= 0) close(fd);
+	}
+	if (rc != 0 && !mbox) {
+		/* the ones done are not undone again */
+		int done = i - 1;
+		for (int k = 0; k < done; k++) free(l->cp[k].file);
+		memmove(l->cp, l->cp + done, sizeof *l->cp * (size_t)(l->ncp - done));
+		l->ncp -= done;
+		return -1;
+	}
+	cp_clear(l);
+	return rc;
+}
+
+int local_remove(local_t *l, const uint32_t *uids, int n)
+{
+	lfolder *f = l->sel >= 0 ? &l->f[l->sel] : NULL;
+	if (!f) {
+		seterr(l, "no folder open");
+		return -1;
+	}
+	if (f->kind == LF_MBOX) {
+		seterr(l, "%s is an mbox file: mcm only reads it and adds to it, it cannot "
+		          "remove messages from it", f->name);
+		return -1;
+	}
+	int rc = 0;
+	if (f->kind == LF_POP3) {
+		if (pop_sync(l) != 0) return -1;
+		for (int i = 0; i < n && rc == 0; i++) {
+			lmsg *m = by_uid(l, uids[i]);
+			if (m && m->num && pop3_dele(l->pop, m->num) != 0) {
+				seterr(l, "%s", pop3_error(l->pop));
+				rc = -1;
+			}
+		}
+		if (rc != 0) {
+			pop3_quit(l->pop);    /* a broken session: the server removes nothing */
+			return -1;
+		}
+		if (pop3_reconnect(l->pop) != 0) {   /* QUIT: now the server removes them */
+			seterr(l, "%s", pop3_error(l->pop));
+			return -1;
+		}
+	} else {
+		for (int i = 0; i < n; i++) {
+			lmsg *m = by_uid(l, uids[i]);
+			if (!m) continue;
+			char *p = path_join(f->path, m->file);
+			if (unlink(p) != 0 && errno != ENOENT) {
+				seterr(l, "cannot remove %s: %s", p, strerror(errno));
+				rc = -1;
+			}
+			free(p);
+			if (rc != 0) break;
+			if (f->kind == LF_MH) {               /* drop it from the sequences */
+				int v = atoi(m->key);
+				seq_update(l, f->path, "replied", v, 0);
+				seq_update(l, f->path, "flagged", v, 0);
+				/* (unseen: removing it would only mark a missing message seen) */
+			}
+		}
+	}
+	if (l->raw_uid) {
+		buf_free(&l->raw);
+		l->raw_uid = 0;
+	}
+	lmsg *nm;
+	int nn;
+	if (scan(l, f, &nm, &nn) != 0) return -1;
+	merge(l, nm, nn);                              /* reports the expunges */
+	stamp(l, f);
+	return rc;
+}
+
+/* ------------------------------------------------------------------ */
 /* Saving messages (Sent, Drafts)                                      */
 
 /* CRLF -> LF */
@@ -1451,8 +1740,11 @@ static int append_maildir(local_t *l, const char *path, const char *flags, const
 	} else {
 		int ok = write_all(fd, msg->d, msg->len) == 0 && fsync(fd) == 0;
 		if (close(fd) != 0) ok = 0;
-		if (ok && rename(tmp.d, dst.d) == 0) rc = 0;
-		else {
+		if (ok && rename(tmp.d, dst.d) == 0) {
+			rc = 0;
+			free(l->wrote);
+			l->wrote = xstrdup(dst.d);
+		} else {
 			seterr(l, "cannot write %s: %s", tmp.d, strerror(errno));
 			unlink(tmp.d);
 		}
@@ -1482,7 +1774,9 @@ static int append_mbox(local_t *l, const char *path, const char *flags, const bu
 	}
 	buf_t o = {0};
 	struct stat st;
-	if (fstat(fd, &st) == 0 && st.st_size > 0) {
+	l->wbefore = 0;
+	if (fstat(fd, &st) == 0) l->wbefore = (long long)st.st_size;
+	if (l->wbefore > 0) {
 		/* the previous message must end in a blank line */
 		char end[2] = {0, 0};
 		off_t at = st.st_size >= 2 ? st.st_size - 2 : 0;
@@ -1494,10 +1788,14 @@ static int append_mbox(local_t *l, const char *path, const char *flags, const bu
 	char date[64];
 	struct tm tm;
 	gmtime_r(&now, &tm);
-	char wd_mon[16];
-	strftime(wd_mon, sizeof wd_mon, "%a %b", &tm);
-	snprintf(date, sizeof date, "%s %2d %02d:%02d:%02d %d", wd_mon, tm.tm_mday, tm.tm_hour, tm.tm_min,
-	         tm.tm_sec, tm.tm_year + 1900);
+	/* always in English (not strftime's %a %b: they follow the locale), as
+	 * other programs expect: "Tue Nov 17 22:52:42 2026" */
+	static const char *const wd[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+	static const char *const mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+	                                  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+	snprintf(date, sizeof date, "%s %s %2d %02d:%02d:%02d %d", wd[tm.tm_wday % 7], mon[tm.tm_mon % 12],
+	         tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec, tm.tm_year + 1900);
+	l->wfrom = l->wbefore + (long long)o.len;
 	buf_printf(&o, "From mcm@localhost %s\n", date);
 	const char *st_flags = flags && strstr(flags, "\\Seen") ? "RO" : "O";
 	buf_printf(&o, "Status: %s\n", st_flags);
@@ -1516,6 +1814,9 @@ static int append_mbox(local_t *l, const char *path, const char *flags, const bu
 	buf_addc(&o, '\n');
 	int rc = write_all(fd, o.d, o.len) == 0 && fsync(fd) == 0 ? 0 : -1;
 	if (rc != 0) seterr(l, "cannot write %s: %s", path, strerror(errno));
+	l->wto = l->wbefore + (long long)o.len;
+	free(l->wrote);
+	l->wrote = NULL;
 	buf_free(&o);
 	close(fd);   /* also releases the lock */
 	return rc;
@@ -1555,7 +1856,8 @@ static int append_mh(local_t *l, const char *path, const char *flags, const buf_
 			free(p);
 			return -1;
 		}
-		free(p);
+		free(l->wrote);
+		l->wrote = p;
 		if (!(flags && strstr(flags, "\\Seen"))) return seq_update(l, path, "unseen", v, 1);
 		return 0;
 	}

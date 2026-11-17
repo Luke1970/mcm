@@ -15,8 +15,8 @@ Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
 │N Grüße aus Köln      Jürgen M…  261111.09:15││Subject  Weekly deals                   █
 │  plain old mail      alice@ex…  261111.00:00││                                        ░
 │                                             <>Hello,                                  ▼
-└─L────────── TAB=Folder|Accounts  PgUp/PgDn ─┘└─H─W─X─S─P─T─────────── Spc=PgDn B=PgUp ─┘
- test@localhost  Enter Open  F5 Refresh  Q/^Q Quit
+└─L─O──────── TAB=Folder|Accounts  PgUp/PgDn ─┘└─H─W─X─S─P─T─────────── Spc=PgDn B=PgUp ─┘
+ test@localhost  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 ```
 
 Features:
@@ -432,7 +432,12 @@ and `accounts_width` the Accounts window's share in the four-column layout.
 | ← → | move between the windows: ← goes message → email list → Folders → Accounts, → back; in the message with W off they move the text sideways (8 columns), and ← at the start goes to the window on the left |
 | ↑ ↓ Home End | move / scroll |
 | PgUp PgDn | page through the message list (only there) |
-| Enter | open account / folder / read message |
+| Enter | open account / folder; in the email list: select the message (or unselect it) and go to the next one |
+| Shift-Enter | select from the last message Enter selected to this one (terminals that report Shift-Enter: kitty, foot, WezTerm, xterm with `modifyOtherKeys`; elsewhere it is Enter) |
+| Shift-↑ Shift-↓ | select the message and the one above / below |
+| O | the selected messages in a window of their own: copy, move, delete (see *Selected messages*) |
+| U | undo the last copy, move or delete to Deleted Items (asks first; see *Selected messages*) |
+| Esc | in the email list: leave the filter, else clear the selection |
 | Space | page down in the message, from every window |
 | Shift-Space, Ctrl-Space, Alt-Space, Backspace | page up in the message, from every window |
 | B | page up in the message (in the message window) |
@@ -444,6 +449,7 @@ and `accounts_width` the Accounts window's share in the four-column layout.
 | P | print the message (`lp`; on Windows Notepad prints it) |
 | T | attachments: list them, open or save one (see below) |
 | L | filter the email list (see *Filter*) |
+| → | from the email list: to the message window |
 | F5 | refresh folder (also polled every 60 s) |
 | F1 / ? | help |
 | Q | quit |
@@ -452,11 +458,12 @@ and `accounts_width` the Accounts window's share in the four-column layout.
 | C | Config: SMTP settings, account settings, switch account, wrap width, theme, delete all stored passwords |
 | Ctrl-← / Ctrl-→ | narrower / wider left column |
 | A | accounts: switch, add, name, full name, stored password |
-| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; click L on the list's or H, W, X, S, P, T on the message's bottom border; drag the column border to resize; use a scroll bar (every window that needs one, the help window too, and a horizontal one under an unwrapped message); the wheel scrolls the message, the lists and the help |
+| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; click L, O or U on the list's or H, W, X, S, P, T on the message's bottom border; drag the column border to resize; use a scroll bar (every window that needs one, the help window too, and a horizontal one under an unwrapped message); the wheel scrolls the message, the lists and the help |
 
 The bottom border of the list and the message window shows their paging keys.
 The list's bottom border starts with **L** (the filter, inverted while it is
-on). The message window's bottom border starts with **H W X S P T**: all headers,
+on), **O** (the selected messages, inverted while there are any) and, while
+the last copy or move can be undone, **U**. The message window's bottom border starts with **H W X S P T**: all headers,
 wrapped lines, hex dump, save, print, attachments; H, W and X are inverted while their mode
 is on, and a click on a letter works like the key. Pressing W also turns H and
 X off, back to the message text. With W on (the default, kept in `mcm.conf` as
@@ -477,18 +484,29 @@ is never overwritten (`-2`, `-3` is added). The file is readable by you only
 same text to the printer with `lp` (CUPS); on Windows Notepad prints it on the
 default printer.
 
-**T** lists the open message's attachments (name, type, size). Choose one with
+**T** lists the open message's attachments (name, type, size). Names are
+decoded in both encodings mail programs use for names that are not plain
+ASCII: RFC 2047 (`=?UTF-8?B?...?=`) and RFC 2231 (`filename*=UTF-8''%C3%A9...`,
+also split in parts as `filename*0*`, `filename*1`, ...). Choose one with
 the arrows and Enter, then **Open** or **Save**:
 
 - **Open** shows it in the program your desktop uses for that kind of file
   (`xdg-open`; on Windows the program Windows uses). mcm writes it to a
   private folder first (`$XDG_RUNTIME_DIR/mcm-attachments`, else
   `~/.cache/mcm-attachments`; on Windows `%TEMP%\mcm-attachments`), which is
-  emptied when mcm ends and starts. Program files (`.exe`, `.bat`, `.js`,
-  `.sh`, `.desktop` and the like) are never opened, only saved.
+  emptied when mcm ends and starts. Files that can run code are never
+  opened, only saved: programs and scripts (`.exe`, `.bat`, `.js`, `.sh`,
+  `.desktop` and the like), web pages (`.html`, `.svg`: the browser would
+  run their scripts), Office files with macros (`.docm`, `.xlsm`, `.pptm`)
+  and Windows types used in attacks (`.chm`, `.msc`, `.one`, `.vhd` ...).
+  The check uses the name as it is saved, so `invoice.exe ` (with a
+  trailing space) counts as `.exe`.
 - **Save** puts it in `~/Downloads` (or your home folder) under its own name,
   without overwriting (`-2`, `-3` is added) and readable by you only.
   Folder parts in the name are removed and a leading dot becomes `_`.
+
+Text-direction controls (U+202E and the like) are shown as `?` and become `_`
+in file names: they could make `x<U+202E>fdp.exe` look like `xexe.pdf`.
 
 On IMAP only the chosen attachment is downloaded.
 
@@ -725,7 +743,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.974 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.979 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -1024,6 +1042,93 @@ Notes:
 - The benchmark is in `dos/` and can be run on real hardware; see
   [Build, MS-DOS](#ms-dos).
 
+### Selected messages
+
+Moving through the email list shows each message, as before. **Enter** selects
+the message under the cursor (or unselects it) and moves to the next one, so
+pressing it a few times selects a run of messages. **Shift-Enter** selects
+everything from the message Enter last selected to the one under the cursor,
+and **Shift-↑ / Shift-↓** select while moving. Selected messages have a `+`
+and the hotkey color; the list's title says how many there are
+(`INBOX  8152 msgs, 1028 new, 3 selected`). **Esc** clears the selection, and
+so does opening another folder.
+
+**O** (or a click on the O in the list's bottom border) opens a window over
+the whole screen with the selected messages (none selected: the one under the
+cursor), newest first:
+
+```
+┌─ Selected: 3 messages, 31.5 kB ───────────────────────────────────────────────┐
+│Flag Subject                     From               Date                   Size│
+│S--- Morgen de laatste dag 7%    KRSTBM             2026-11-15 19:31    12.3 kB│
+│SA-- Re: width                   Lucien van Lint    2026-11-15 15:24    18.9 kB│
+│S-F- Weekly deals                Newsletter         2026-11-12 23:01  255 bytes│
+└─ C=Copy ─ M=Move ─ D=Delete ─ Enter=Unselect ─ Esc=Close ─────────────────────┘
+ Flags: S=Seen A=Answered F=Flagged D=Deleted
+```
+
+The flags are the IMAP system flags: **S**een, **A**nswered, **F**lagged,
+**D**eleted. Sizes are in bytes, kB or MB (1 kB = 1000 bytes; the decimal sign
+follows your locale). In the window:
+
+- **C** copies the messages to a folder of this account: a list of the
+  folders (full paths, the open one left out) to choose from.
+- **M** moves them there: they leave the list.
+- **D** deletes them: they are moved to **Deleted Items**. That is the
+  folder the server marks as trash (`\Trash`, RFC 6154), else one called
+  Deleted Items, Trash, Deleted or Deleted Messages. On IMAP, when there is
+  none, mcm offers to create Deleted Items. For local folders it is listed
+  (like Sent and Drafts) and made by the first message moved there. In
+  Deleted Items itself, D asks and then deletes the messages for good.
+- **Enter** (or Del) takes the message under the cursor out of the selection;
+  **Esc** (or O) closes the window and keeps the selection.
+
+After C, M or D the selection is cleared. The messages go in date order, so they
+keep their order in the other folder.
+
+**U** undoes the last Copy, Move or Delete (to Deleted Items) of this session
+and account, after asking: moved and deleted messages go back to the folder
+they came from (with their flags), copies are removed again. While there is
+something to undo the list's bottom border shows a **U** (`└─L─O─U─`), and the
+status line after the action ends in `(U=Undo)`. Only the last action can be
+undone, once; deleting for good (in Deleted Items) cannot be undone.
+
+mcm checks that it undoes the right messages, and does nothing when it cannot
+be sure:
+
+- **IMAP:** before copying or moving, mcm notes the messages' Message-IDs. The
+  copies are found by the numbers the server gives them (`COPYUID`, UIDPLUS);
+  without UIDPLUS, among the messages that arrived in the folder since (from
+  the `UIDNEXT` noted before). Only messages with the noted Message-IDs are
+  touched; when one is missing, or two messages could be it (the same
+  Message-ID twice), nothing is undone. A folder that was deleted and made
+  again (other `UIDVALIDITY`) is refused too.
+- **Maildir and MH:** the copies are the files mcm wrote (a Maildir file
+  renamed since, for its flags, is found by the rest of its name).
+- **mbox:** the messages added are cut off the end of the file again, but only
+  when the file has not changed since (same size); else nothing is undone.
+- **POP3:** messages moved or deleted out of the POP3 inbox were deleted on
+  the server and cannot be put back there; undoing a copy works.
+
+On an IMAP server without UIDPLUS the undo leaves the copies marked deleted
+(D), like a move does there; with MOVE but no UIDPLUS it is a real move
+back.
+
+How it is done:
+
+- **IMAP:** `UID COPY`; `UID MOVE` (RFC 6851) when the server has MOVE, else
+  `UID COPY`, `\Deleted` and `UID EXPUNGE` (UIDPLUS, RFC 4315). A server
+  without UIDPLUS can only expunge all deleted messages at once, which would
+  also remove messages marked deleted elsewhere; mcm then leaves the moved
+  messages marked deleted (D) and says so.
+- **Maildir and MH:** the message files are copied (with their flags) and
+  removed.
+- **POP3 inbox:** messages can be copied or moved to local folders; moving and
+  deleting remove them from the server (`DELE`, carried out at the end of the
+  session, which mcm then starts again).
+- **mbox files** are only read and added to: messages can be copied or moved
+  into them, but not out of them (Copy works, Move and Delete say why not).
+
 ## Source layout
 
 | File | Purpose |
@@ -1035,14 +1140,15 @@ Notes:
 | `src/screen.c` | drawing the windows, column layout and borders, scroll bars, status line |
 | `src/msgwin.c` | the message window: wrapping, hex, `:` commands, save and print |
 | `src/attach.c` | attachments (T): open or save |
+| `src/pick.c` | selected messages (Enter, Shift-Enter) and their window (O): copy, move, delete |
 | `src/keys.c` | keys of the main screen, mouse clicks in the windows, the help window |
 | `src/certs.c` | untrusted certificates and the always-accepted ones |
 | `src/account.c` | accounts, stored passwords, the Config menu, SMTP settings |
 | `src/send.c` | writing mail (new, reply, forward), sending it or keeping it as a draft |
-| `src/store.c` | one interface for IMAP, POP3 and local folders |
+| `src/store.c` | one interface for IMAP, POP3 and local folders; undo of the last copy or move |
 | `src/pop3.c` | POP3: TLS or required STLS, USER/PASS, LIST, UIDL, TOP, RETR, new sessions |
 | `src/local.c` | Maildir (Maildir++), mbox and MH folders, the POP3 inbox and its seen/answered state |
-| `src/imap.c` | IMAP: response parser, LIST, SELECT, STATUS, ranged/partial FETCH, BODYSTRUCTURE, APPEND, change tracking, auto-reconnect |
+| `src/imap.c` | IMAP: response parser, LIST, SELECT, STATUS, ranged/partial FETCH, BODYSTRUCTURE, APPEND, COPY/MOVE/EXPUNGE (COPYUID), CREATE, change tracking, auto-reconnect |
 | `src/net.c`  | TCP, TLS (implicit and STARTTLS), certificate checks |
 | `src/smtp.c` | SMTP submission: EHLO, STARTTLS, AUTH, MAIL/RCPT/DATA |
 | `src/compose.c` | header syntax checks, address parser, encoding and folding, MIME body, format=flowed, attachments |

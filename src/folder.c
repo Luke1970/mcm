@@ -90,6 +90,24 @@ msg_t *msg_at(int i)
 	return k < (uint32_t)c->n ? &c->m[k] : NULL;
 }
 
+/* Header of list row i, read from the server when its block is not loaded
+ * (NULL on an error). */
+msg_t *msg_load(int i)
+{
+	msg_t *m = msg_at(i);
+	if (m || i < 0 || i >= nrows()) return m;
+	uint32_t pos = (uint32_t)(nrows() - i);
+	uint32_t from = (pos - 1) / CHUNK * CHUNK + 1, to = from + CHUNK - 1;
+	if (to > (uint32_t)nrows()) to = (uint32_t)nrows();
+	int n;
+	if (fetch_positions(from, to, &m, &n) != 0) {
+		set_status("Error: %s", store_error(A.im));
+		return NULL;
+	}
+	chunk_store(from, n, m);
+	return msg_at(i);
+}
+
 /* Load the header blocks for the visible rows plus one page either side. */
 static void load_window(void)
 {
@@ -282,6 +300,7 @@ void open_folder(int idx)
 	now_status("Opening %s...", f->display);
 	close_message();
 	cache_clear();
+	pick_clear();                          /* so does a selection */
 	filter_off();                          /* a filter belongs to one folder */
 	A.filter[0] = '\0';
 	A.nmsgs = A.msel = A.mtop = 0;
@@ -304,6 +323,28 @@ void open_folder(int idx)
 	set_status("%s", "");
 	A.pending_load = A.nmsgs > 0;          /* show the latest message */
 	A.last_poll = time(NULL);
+}
+
+/* Open the current folder again (after the store had another one
+ * selected), keeping the filter and, as far as it goes, the cursor. */
+void reopen_folder(void)
+{
+	int idx = A.cur_folder, sel = A.msel, top = A.mtop, fon = A.fon;
+	char filt[sizeof A.filter];
+	snprintf(filt, sizeof filt, "%s", A.filter);
+	if (idx < 0) return;
+	open_folder(idx);
+	if (A.cur_folder != idx) return;
+	if (fon) {
+		snprintf(A.filter, sizeof A.filter, "%s", filt);
+		filter_apply();
+	}
+	int n = nrows();
+	A.msel = sel < n ? sel : n - 1;
+	if (A.msel < 0) A.msel = 0;
+	A.mtop = top;
+	ensure_visible(&A.msel, &A.mtop, A.mrows, n);
+	A.pending_load = n > 0;
 }
 
 void refresh_folder(int quiet)

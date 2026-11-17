@@ -337,3 +337,14 @@ int pop3_retr(pop3_t *p, int num, buf_t *out)
 	snprintf(c, sizeof c, "RETR %d", num);
 	return fetch(p, c, out);
 }
+
+int pop3_dele(pop3_t *p, int num)
+{
+	if (p->broken) {
+		seterr(p, "connection lost");
+		return -1;
+	}
+	char c[48];
+	snprintf(c, sizeof c, "DELE %d", num);
+	return cmd(p, c, NULL);
+}

@@ -11,6 +11,12 @@ char *conv_to_utf8(const char *charset, const char *in, size_t len, size_t *outl
 /* Decode RFC 2047 encoded-words (=?utf-8?Q?...?=) into UTF-8. */
 char *mime_decode_words(const char *s);
 
+/* The value of parameter `want` (e.g. "filename") from n attribute/value
+ * pairs, decoded to UTF-8: RFC 2231 (want*=charset''%XX, continuations
+ * want*0, want*1*, ...) before the plain form, which may hold RFC 2047
+ * words. malloc'd, or NULL when absent or empty. */
+char *mime_param_decode(const char *const *attr, const char *const *vals, int n, const char *want);
+
 /* Return the (unfolded, decoded) value of a top-level header, or NULL. */
 char *mime_header(const char *raw, size_t len, const char *name);
 

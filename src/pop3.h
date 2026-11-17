@@ -36,6 +36,9 @@ int  pop3_login(pop3_t *p, const char *user, const char *pass);
 /* New session (QUIT, connect, log in again): shows new mail. */
 int  pop3_reconnect(pop3_t *p);
 void pop3_quit(pop3_t *p);
+/* Mark message num for removal; the server removes it at QUIT (pop3_quit,
+ * pop3_reconnect), and not at all when the connection breaks first. */
+int  pop3_dele(pop3_t *p, int num);
 /* Incremented by every new session. */
 unsigned    pop3_generation(pop3_t *p);
 const char *pop3_password(pop3_t *p);

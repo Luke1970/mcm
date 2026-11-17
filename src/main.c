@@ -469,6 +469,7 @@ static void leave_account(void)
 {
 	close_message();
 	cache_clear();
+	pick_clear();
 	filter_off();
 	A.filter[0] = '\0';
 	folders_free(A.folders, A.nfolders);
@@ -676,8 +677,11 @@ int main(int argc, char **argv)
 			}
 			if (ev.y == A.fbar_y && ev.x > A.fbar_x && ev.x < A.fbar_x + A.fbar_w - 1 &&
 			    A.cur_folder >= 0) {
-				/* the list's bottom border: the filter (Esc=Leave ends it) */
-				if (A.fon && A.fesc_x1 && ev.x >= A.fesc_x0 && ev.x < A.fesc_x1) filter_leave();
+				/* the list's bottom border: O the selected messages, U undo,
+				 * else the filter (Esc=Leave ends it) */
+				if (ev.x == A.fbar_x + 4 && !A.fedit) { if (nrows()) pick_window(); }
+				else if (ev.x == A.fbar_x + 6 && !A.fedit && pick_can_undo()) pick_undo();
+				else if (A.fon && A.fesc_x1 && ev.x >= A.fesc_x0 && ev.x < A.fesc_x1) filter_leave();
 				else filter_edit();
 				continue;
 			}

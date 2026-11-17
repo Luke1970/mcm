@@ -23,7 +23,7 @@
 
 #define KEY_ESC 27
 
-int ui_key_cleft, ui_key_cright, ui_key_sspace;
+int ui_key_cleft, ui_key_cright, ui_key_sspace, ui_key_senter;
 
 static void (*quit_fn)(void);
 
@@ -133,6 +133,7 @@ void ui_init(const theme_t *t)
 	ui_key_cleft = CTL_LEFT;
 	ui_key_cright = CTL_RIGHT;
 	ui_key_sspace = KEY_MAX + 3;   /* not reported by the Windows console */
+	ui_key_senter = KEY_MAX + 4;   /* neither is Shift-Enter */
 	/* PDCurses switches the console to VT mode (256 colors) here */
 	if (has_colors()) {
 		start_color();
@@ -207,6 +208,10 @@ void ui_init(const theme_t *t)
 		"\033[32;5u", "\033[27;5;32~", "\033 ",
 	};
 	for (size_t i = 0; i < sizeof sspace / sizeof *sspace; i++) define_key(sspace[i], ui_key_sspace);
+	/* Shift-Enter: the same two ways (most terminals send a plain Enter) */
+	ui_key_senter = KEY_MAX + 4;
+	define_key("\033[13;2u", ui_key_senter);
+	define_key("\033[27;2;13~", ui_key_senter);
 	mouseinterval(0);   /* report presses immediately, no click detection delay */
 	theme_apply(t);
 	bkgdset(' ' | COLOR_PAIR(CP_NORMAL));
@@ -232,9 +237,16 @@ void ui_end(void)
 	endwin();
 }
 
+/* Bidi controls that reorder the text after them: the terminal would show
+ * "x\u202Efdp.exe" as "xexe.pdf". Shown as a visible mark instead. */
+static int bidi_control(wchar_t c)
+{
+	return (c >= 0x202A && c <= 0x202E) || (c >= 0x2066 && c <= 0x2069);
+}
+
 int ui_wcwidth(wchar_t c)
 {
-	if (c < 32 || c == 0x7F) return 1;
+	if (c < 32 || c == 0x7F || bidi_control(c)) return 1;
 	int w = wcwidth(c);
 	return w < 0 ? 1 : w;
 }
@@ -251,6 +263,7 @@ int ui_putw(int y, int x, const wchar_t *s, int width, attr_t attr, short pair)
 		wchar_t c = *s;
 		int cw;
 		if (c < 32 || c == 0x7F) { c = ' '; cw = 1; }
+		else if (bidi_control(c)) { c = '?'; cw = 1; }
 		else {
 			cw = wcwidth(c);
 			if (cw < 0) { c = '?'; cw = 1; }

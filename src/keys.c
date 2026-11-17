@@ -140,6 +140,16 @@ int handle_key(int ch)
 	case 'l': case 'L':
 		if (A.cur_folder >= 0) filter_edit();
 		return 1;
+	case 'o': case 'O':
+		if (A.cur_folder >= 0 && nrows()) pick_window();
+		return 1;
+	case 'u': case 'U':
+		pick_undo();
+		return 1;
+	}
+	if (ch == ui_key_senter && A.focus == COL_LIST) {
+		pick_range();
+		return 1;
 	}
 	if (ch == ui_key_cleft || ch == ui_key_cright) {   /* Ctrl-arrows: column border */
 		/* the border right of the folders, or the one left of the message */
@@ -199,10 +209,23 @@ int handle_key(int ch)
 		case KEY_NPAGE: select_msg(A.msel + page); break;
 		case KEY_HOME: select_msg(0); break;
 		case KEY_END: select_msg(nrows() - 1); break;
-		case '\n': case '\r': case KEY_ENTER: case KEY_RIGHT:
+		case KEY_RIGHT:
 			if (nrows()) focus_to(COL_MSG);
 			break;
-		case 27: if (A.fon) filter_leave(); break;
+		case '\n': case '\r': case KEY_ENTER: pick_toggle(); break;   /* select (and the next) */
+		case KEY_SR: pick_extend(-1); break;                         /* Shift-Up */
+		case KEY_SF: pick_extend(1); break;                          /* Shift-Down */
+#ifdef KEY_SUP
+		case KEY_SUP: pick_extend(-1); break;                        /* (PDCurses) */
+		case KEY_SDOWN: pick_extend(1); break;
+#endif
+		case 27:
+			if (A.fon) filter_leave();
+			else if (pick_count()) {
+				pick_clear();
+				set_status("Selection cleared");
+			}
+			break;
 		case KEY_LEFT: focus_to(wide() && !full() ? A.side : COL_FOLDERS); break;
 		}
 	} else {
