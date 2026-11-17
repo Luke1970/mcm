@@ -1,0 +1,12 @@
+# Paper: dark gray on warm off-white, blue selection bar
+BACKGROUND   = #fdf6e3
+TEXT         = #3a4449
+HIGHLIGHTBG  = #268bd2
+HIGHLIGHTTXT = #ffffff
+MENUBG       = #e4dcc4
+MENUTXT      = #3a4449
+HOTKEY       = #cb4b16
+TITLEBG      = #1a6aa5
+TITLETXT     = #ffffff
+HEADERBG     = #eee8d5
+HEADERTXT    = #3a4449

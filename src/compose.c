@@ -1103,7 +1103,7 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 
 	if (!o->draft) {
 		if (!ff || !*ff->value) {
-			fail(out, ff ? ff->line : 0, "From: is required (your address)");
+			fail(out, ff ? ff->line : 0, "From: is required: your address (for this account: Config, Account)");
 			goto done;
 		}
 		int nfrom = alist_count(from);

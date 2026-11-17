@@ -1,6 +1,7 @@
 /* editor.c - full-screen vim-like message editor (see editor.h) */
 #include "editor.h"
 #include "helptext.h"   /* help/editor.txt */
+#include "mime.h"
 #include "theme.h"
 #include "ui.h"
 #include "util.h"
@@ -38,7 +39,22 @@ typedef struct {
 	int     want_col;      /* display column kept on vertical moves */
 	int     top;           /* first line shown */
 	int     y0, x0, rows, cols;   /* text area on screen */
+	/* the header window is a form: one row per line, "Name:" fixed in a
+	 * column of its own, the field after it scrolled sideways */
+	int     field;
+	int     hoff, hoff_line;      /* first column of the cursor line's field shown */
+	/* the message with unWrap: lines not wrapped on screen, all of them
+	 * scrolled sideways by hoff columns */
+	int     nowrap;
 } pane_t;
+
+/* Horizontal scroll bar on the message window's bottom border (unWrap). */
+typedef struct {
+	int y, x, len;         /* where it is drawn (len 0: not shown) */
+	int th, tsize;         /* thumb: first column and length */
+	int n;                 /* columns of the text (widest line, cursor room) */
+	int grab;              /* dragging the thumb: column offset, -1 not */
+} hbar_t;
 
 enum { M_HDR, M_BODY, M_CMD };   /* header window, body editing, command mode */
 
@@ -62,6 +78,7 @@ typedef struct {
 	int     nhdr;          /* header lines in the text, shown and hidden */
 	int     want_line;     /* set_text: header line (of all) to put the cursor on */
 	int     want_vis;      /* ... its index in the header window, or -1 */
+	hbar_t  hb;
 } ed_t;
 
 static ed_t *E;   /* for the dialog background callback */
@@ -93,10 +110,47 @@ static void pane_fix(pane_t *p)
 	if (p->cx > p->l[p->cy].len) p->cx = p->l[p->cy].len;
 }
 
+static int is_blank(char c) { return c == ' ' || c == '\t'; }
+
+/* Header window: length of "Name:" at the start of line l, 0 if it has no
+ * name (a continuation line, or a new line whose name is being typed). */
+static size_t hdr_name_len(const line_t *l)
+{
+	if (!l->len || is_blank(l->s[0])) return 0;
+	for (size_t i = 0; i < l->len; i++) {
+		unsigned char c = (unsigned char)l->s[i];
+		if (c == ':') return i > 0 ? i + 1 : 0;
+		if (c <= ' ' || c > 126) return 0;
+	}
+	return 0;
+}
+
+/* Where the editable field starts: after "Name:" and its blanks (the name
+ * cannot be edited); after the indent of a continuation line; else 0. */
+static size_t hdr_min(const line_t *l)
+{
+	size_t n = hdr_name_len(l);
+	if (!n && !(l->len && is_blank(l->s[0]))) return 0;
+	while (n < l->len && is_blank(l->s[n])) n++;
+	return n;
+}
+
+/* "Name:value" becomes "Name: value", so the field starts after a space. */
+static void hdr_space(line_t *l)
+{
+	size_t n = hdr_name_len(l);
+	if (!n || (n < l->len && is_blank(l->s[n]))) return;
+	l->s = xrealloc(l->s, l->len + 2);
+	memmove(l->s + n + 1, l->s + n, l->len - n + 1);
+	l->s[n] = ' ';
+	l->len++;
+}
+
 /* The header window shows only the headers the writer fills in: To, Cc,
  * Bcc and Subject, and the Attach: lines of attached files. The others
  * (From, Date, In-Reply-To, References, ...) are kept as they are and sent
- * along; :e shows them in the external editor. */
+ * along; :e shows them in the external editor. An empty From: is shown
+ * as well, to be filled in (an account without an address). */
 static int shown_header(const char *s, size_t n, int prev_shown)
 {
 	static const char *const show[] = {"To", "Cc", "Bcc", "Subject", "Attach", NULL};
@@ -106,6 +160,11 @@ static int shown_header(const char *s, size_t n, int prev_shown)
 	size_t k = (size_t)(c - s);
 	for (int i = 0; show[i]; i++)
 		if (strlen(show[i]) == k && !strncasecmp(s, show[i], k)) return 1;
+	if (k == 4 && !strncasecmp(s, "From", 4)) {
+		const char *v = c + 1, *end = s + n;
+		while (v < end && is_blank(*v)) v++;
+		return v == end;
+	}
 	return 0;
 }
 
@@ -139,6 +198,7 @@ static void set_text(ed_t *e, const char *text, size_t len)
 		if (!nl) break;
 		p += n + 1;
 	}
+	for (int i = 0; i < e->hp.n; i++) hdr_space(&e->hp.l[i]);
 	pane_fix(&e->hp);
 	pane_fix(&e->bp);
 }
@@ -317,8 +377,6 @@ static size_t x_of_col(const line_t *l, int want)
 	return i;
 }
 
-static int is_blank(char c) { return c == ' ' || c == '\t'; }
-
 /* ------------------------------------------------------------------ */
 /* Hard wrap at WRAP_COL with format=flowed soft breaks                 */
 
@@ -436,6 +494,11 @@ static int word_break(const pane_t *pn, const line_t *l, size_t i, int c)
  * boundaries within the pane's width. Tabs expand relative to the screen row. */
 static void pos_of(const pane_t *pn, const line_t *l, size_t x, int *row, int *col)
 {
+	if (pn->field || pn->nowrap) {         /* header window, unWrap: one row per line */
+		*row = 0;
+		*col = col_of(l, x);
+		return;
+	}
 	int r = 0, c = 0;
 	for (size_t i = 0; i < x && i < l->len;) {
 		size_t cl;
@@ -477,6 +540,7 @@ static size_t x_at(const pane_t *pn, const line_t *l, int row, int col)
 /* Screen rows a line takes when wrapped. */
 static int line_rows(const pane_t *pn, const line_t *l)
 {
+	if (pn->field || pn->nowrap) return 1;
 	int r, c;
 	pos_of(pn, l, l->len, &r, &c);
 	return r + 1;
@@ -484,6 +548,180 @@ static int line_rows(const pane_t *pn, const line_t *l)
 
 /* ------------------------------------------------------------------ */
 /* Drawing                                                             */
+
+/* Header window: width of the name column ("Subject: "), at most half. */
+static int name_w(const pane_t *pn)
+{
+	int w = 0;
+	for (int i = 0; i < pn->n; i++) {
+		size_t n = hdr_name_len(&pn->l[i]);
+		int cw = n ? col_of(&pn->l[i], n) + 1 : 0;
+		if (cw > w) w = cw;
+	}
+	return w > pn->cols / 2 ? pn->cols / 2 : w;
+}
+
+/* Header line i: the column its field starts at (a line whose name is
+ * still being typed starts at the left), and the field as a line. */
+static int field_of(const pane_t *pn, int i, int nw, line_t *v)
+{
+	const line_t *l = &pn->l[i];
+	size_t vs = hdr_min(l);
+	v->s = l->s + vs;
+	v->len = l->len - vs;
+	return hdr_name_len(l) || (l->len && is_blank(l->s[0])) ? nw : 0;
+}
+
+/* Keep the cursor in its field's view: scroll that field sideways. */
+static void field_scroll(pane_t *pn)
+{
+	if (pn->hoff_line != pn->cy) {
+		pn->hoff = 0;
+		pn->hoff_line = pn->cy;
+	}
+	line_t v;
+	int vx = field_of(pn, pn->cy, name_w(pn), &v);
+	int avail = pn->cols - vx > 1 ? pn->cols - vx : 1;
+	int cc = col_of(&v, pn->cx - (size_t)(v.s - pn->l[pn->cy].s));
+	if (cc < pn->hoff) pn->hoff = cc;
+	if (cc >= pn->hoff + avail) pn->hoff = cc - avail + 1;
+}
+
+/* Draw header line i at row y: the name bold, the field after it (the
+ * cursor line from its scroll position); "…" where a field goes on. */
+static void draw_field(const pane_t *pn, int y, int i, int nw, int *cur_y, int *cur_x)
+{
+	const line_t *l = &pn->l[i];
+	size_t nl = hdr_name_len(l);
+	if (nl) {
+		char *name = xstrndup(l->s, nl);
+		ui_puts(y, pn->x0, name, nw > 1 ? nw - 1 : 1, A_BOLD, CP_NORMAL);
+		free(name);
+	}
+	line_t v;
+	int vx = field_of(pn, i, nw, &v);
+	int avail = pn->cols - vx > 1 ? pn->cols - vx : 1;
+	int hoff = i == pn->cy ? pn->hoff : 0, x = pn->x0 + vx;
+	int c = 0;
+	for (size_t p = 0; p < v.len;) {
+		size_t cl;
+		wchar_t w = utf8_next(v.s + p, v.len - p, &cl);
+		int cw = char_w(w, c);
+		if (c >= hoff) {
+			if (c - hoff + cw > avail) {                 /* more than fits */
+				ui_puts(y, x + avail - 1, "…", 1, A_BOLD, CP_NORMAL);
+				break;
+			}
+			char tmp[8];
+			memcpy(tmp, v.s + p, cl);
+			tmp[cl] = '\0';
+			if (w == '\t' || w < 0x20 || (w >= 0x7F && w < 0xA0)) strcpy(tmp, w == '\t' ? " " : "?");
+			ui_puts(y, x + c - hoff, tmp, cw, 0, CP_NORMAL);
+		} else if (c + cw > hoff) {                      /* half of a wide character */
+			ui_puts(y, x, "", c + cw - hoff, 0, CP_NORMAL);
+		}
+		c += cw;
+		p += cl;
+	}
+	if (cur_y && i == pn->cy) {
+		*cur_y = y;
+		*cur_x = x + col_of(&v, pn->cx - (size_t)(v.s - l->s)) - hoff;
+	}
+}
+
+/* unWrap: line i of the message at row y, from column pn->hoff. */
+static void draw_hline(const pane_t *pn, int y, int i, int *cur_y, int *cur_x)
+{
+	const line_t *l = &pn->l[i];
+	int c = 0, x = pn->x0;
+	for (size_t p = 0; p < l->len;) {
+		size_t cl;
+		wchar_t w = utf8_next(l->s + p, l->len - p, &cl);
+		int cw = char_w(w, c);
+		if (c >= pn->hoff) {
+			if (c - pn->hoff + cw > pn->cols) break;
+			char tmp[8];
+			memcpy(tmp, l->s + p, cl);
+			tmp[cl] = '\0';
+			if (w == '\t') tmp[0] = '\0';                 /* blanks (ui_puts pads) */
+			else if (w < 0x20 || (w >= 0x7F && w < 0xA0)) strcpy(tmp, "?");
+			ui_puts(y, x + c - pn->hoff, tmp, cw, 0, CP_NORMAL);
+		} else if (c + cw > pn->hoff) {                    /* half of a wide character */
+			ui_puts(y, x, "", c + cw - pn->hoff, 0, CP_NORMAL);
+		}
+		c += cw;
+		p += cl;
+	}
+	if (cur_y && i == pn->cy) {
+		*cur_y = y;
+		*cur_x = x + col_of(l, pn->cx) - pn->hoff;
+	}
+}
+
+/* unWrap: keep the cursor a few columns away from the window's left and
+ * right edge by moving the text sideways. */
+static int hmargin(const pane_t *pn) { return pn->cols >= 40 ? 8 : pn->cols / 5; }
+
+static void body_scroll(pane_t *pn)
+{
+	if (!pn->nowrap) { pn->hoff = 0; return; }
+	int cc = col_of(&pn->l[pn->cy], pn->cx), m = hmargin(pn);
+	if (cc < pn->hoff + m) pn->hoff = cc - m;
+	if (cc > pn->hoff + pn->cols - 1 - m) pn->hoff = cc - (pn->cols - 1 - m);
+	if (pn->hoff < 0) pn->hoff = 0;
+}
+
+/* After the scroll bar moved the text: the cursor into the visible part. */
+static void cursor_into_view(pane_t *pn)
+{
+	int cc = col_of(&pn->l[pn->cy], pn->cx), m = hmargin(pn);
+	int lo = pn->hoff ? pn->hoff + m : 0, hi = pn->hoff + pn->cols - 1 - m;
+	if (cc < lo) cc = lo;
+	if (cc > hi) cc = hi;
+	pn->cx = x_of_col(&pn->l[pn->cy], cc);
+}
+
+/* The scroll bar under the message (unWrap), when a line does not fit. */
+static void draw_hbar(ed_t *e, int y)
+{
+	pane_t *pn = &e->bp;
+	hbar_t *b = &e->hb;
+	b->len = 0;
+	if (!pn->nowrap) return;
+	int n = 0;
+	for (int i = 0; i < pn->n; i++) {
+		int w = col_of(&pn->l[i], pn->l[i].len) + 1;   /* + room for the cursor */
+		if (w > n) n = w;
+	}
+	if (n < pn->hoff + pn->cols) n = pn->hoff + pn->cols;
+	if (n <= pn->cols || pn->cols < 8) return;
+	b->n = n;
+	b->y = y;
+	b->x = pn->x0 + 1;
+	b->len = pn->cols - 2;
+	int tlen = b->len - 2, range = n - pn->cols;
+	b->tsize = tlen * pn->cols / n;
+	if (b->tsize < 1) b->tsize = 1;
+	b->th = b->x + 1 + (range > 0 ? (pn->hoff * (tlen - b->tsize) + range / 2) / range : 0);
+	ui_puts(y, b->x, "◄", 1, 0, CP_NORMAL);
+	ui_puts(y, b->x + b->len - 1, "►", 1, 0, CP_NORMAL);
+	for (int k = 0; k < tlen; k++) {
+		int c = b->x + 1 + k, on = c >= b->th && c < b->th + b->tsize;
+		ui_puts(y, c, on ? "█" : "░", 1, 0, CP_NORMAL);
+	}
+}
+
+/* Thumb dragged so that its left end is at screen column c. */
+static void hbar_drag_to(ed_t *e, int c)
+{
+	hbar_t *b = &e->hb;
+	pane_t *pn = &e->bp;
+	int tlen = b->len - 2, fr = tlen - b->tsize, p = c - (b->x + 1);
+	if (p < 0) p = 0;
+	if (p > fr) p = fr;
+	pn->hoff = fr > 0 ? (p * (b->n - pn->cols) + fr / 2) / fr : 0;
+	cursor_into_view(pn);
+}
 
 /* Draw line i of a pane at screen row y; header names are bold. */
 static void draw_line(const ed_t *e, const pane_t *pn, int y, int i, int *cur_y, int *cur_x)
@@ -545,32 +783,50 @@ static void ensure_visible(pane_t *pn)
 static void draw_pane(const ed_t *e, const pane_t *pn, int *cur_y, int *cur_x)
 {
 	int y = pn->y0;
+	if (pn->nowrap) {
+		for (int i = pn->top; i < pn->n && y < pn->y0 + pn->rows; i++, y++)
+			draw_hline(pn, y, i, cur_y, cur_x);
+		return;
+	}
+	if (pn->field) {
+		int nw = name_w(pn);
+		for (int i = pn->top; i < pn->n && y < pn->y0 + pn->rows; i++, y++)
+			draw_field(pn, y, i, nw, cur_y, cur_x);
+		return;
+	}
 	for (int i = pn->top; i < pn->n && y < pn->y0 + pn->rows; i++) {
 		draw_line(e, pn, y, i, cur_y, cur_x);
 		y += line_rows(pn, &pn->l[i]);
 	}
 }
 
-static const ui_menuitem CMD_MENU[] = {
+static ui_menuitem CMD_MENU[] = {
 	{"EdIt", UI_HOT_CAPS, 'i'}, {"Send", 0, 'S'}, {"Keep", 0, 'K'}, {"Header", 0, 'H'},
-	{"Wrap", 0, 'W'}, {"aTtach", 1, 'T'},
+	{"Wrap", 0, 'W'}, {"aTtach", 1, 'T'}, {"Open", 0, 'O'},
 };
 #define MENU_WRAP 4
 #define NCMD ((int)(sizeof CMD_MENU / sizeof *CMD_MENU))
 
 /* While editing the message: the same commands for the mouse (typed letters
  * are text), and Esc to leave editing. */
-static const ui_menuitem EDIT_MENU[] = {
+static ui_menuitem EDIT_MENU[] = {
 	{"Esc=leaveEdit", UI_HOT_KEYNAME, 27},
 	{"EdIt", UI_HOT_CAPS, 'i'}, {"Send", 0, 'S'}, {"Keep", 0, 'K'}, {"Header", 0, 'H'},
-	{"Wrap", 0, 'W'}, {"aTtach", 1, 'T'},
+	{"Wrap", 0, 'W'}, {"aTtach", 1, 'T'}, {"Open", 0, 'O'},
 };
 #define NEDIT ((int)(sizeof EDIT_MENU / sizeof *EDIT_MENU))
 
 static void draw_menu(ed_t *e)
 {
-	if (e->mode == M_CMD) ui_menubar(CMD_MENU, NCMD, e->wrap ? 1u << MENU_WRAP : 0);
-	else ui_menubar(EDIT_MENU, NEDIT, e->wrap ? 1u << (MENU_WRAP + 1) : 0);   /* header or message */
+	/* W names what it does: "unWrap" while lines are wrapped, "Wrap" while
+	 * they are not */
+	for (int k = 0; k < 2; k++) {
+		ui_menuitem *it = k ? &EDIT_MENU[MENU_WRAP + 1] : &CMD_MENU[MENU_WRAP];
+		it->label = e->wrap ? "unWrap" : "Wrap";
+		it->hot = e->wrap ? 2 : 0;
+	}
+	if (e->mode == M_CMD) ui_menubar(CMD_MENU, NCMD, 0);
+	else ui_menubar(EDIT_MENU, NEDIT, 0);   /* header or message */
 }
 
 /* Screen layout: menu, header window, body window, status line. The header
@@ -600,22 +856,29 @@ static void draw(void)
 	bkgdset(' ' | COLOR_PAIR(CP_NORMAL));
 	erase();
 	layout(e);
+	/* the cursor never stands in a header name */
+	size_t hmin = hdr_min(&e->hp.l[e->hp.cy]);
+	if (e->hp.cx < hmin) e->hp.cx = hmin;
 	ensure_visible(&e->hp);
+	field_scroll(&e->hp);
+	e->bp.nowrap = !e->wrap;
 	ensure_visible(&e->bp);
+	body_scroll(&e->bp);
 	draw_menu(e);
 
 	int hdr = e->mode == M_HDR;
 	ui_box(1, 0, e->hp.rows + 2, COLS, CP_NORMAL,
 	       hdr ? " Header - Tab: write the message " : " Header ", A_BOLD,
-	       hdr ? CP_HIGHLIGHT : CP_NORMAL);
+	       hdr ? CP_TITLE : CP_NORMAL);
 	char title[128];
 	snprintf(title, sizeof title, " %s%s ", e->cfg->title, e->modified ? " *" : "");
 	ui_box(e->bp.y0 - 1, 0, e->bp.rows + 2, COLS, CP_NORMAL, title, A_BOLD,
-	       hdr ? CP_NORMAL : CP_HIGHLIGHT);
+	       hdr ? CP_NORMAL : CP_TITLE);
 
 	int cur_y = e->p->y0, cur_x = e->p->x0;
 	draw_pane(e, &e->hp, hdr ? &cur_y : NULL, &cur_x);
 	draw_pane(e, &e->bp, hdr ? NULL : &cur_y, &cur_x);
+	draw_hbar(e, e->bp.y0 + e->bp.rows);
 
 	/* status line */
 	ui_fill(LINES - 1, 0, 1, COLS, CP_MENU);
@@ -626,7 +889,7 @@ static void draw(void)
 		ui_puts(LINES - 1, 1, HELP_EDITOR[0] ? HELP_EDITOR[0] : "", COLS - 2, 0, CP_MENU);
 	} else {
 		const char *help = e->mode == M_HDR
-			? "-- HEADER --   Esc command mode   Tab write the message   arrows move (↓ at the end: message)   Enter new header"
+			? "-- HEADER --   Esc command mode   Tab or Enter on Subject: write the message   arrows move   Enter new header line"
 			: "-- EDIT --   Esc command mode   arrows move (↑ at the top: header)   Enter new line";
 		char pos[64];
 		snprintf(pos, sizeof pos, "Ln %d/%d  Col %d", e->p->cy + 1, e->p->n,
@@ -773,37 +1036,7 @@ static void external_editor(ed_t *e)
 	struct stat before;
 	stat(path, &before);
 
-	def_prog_mode();
-	endwin();
-#ifdef _WIN32
-	/* $EDITOR may contain arguments: it is the start of the command line */
-	char cmd[1200];
-	snprintf(cmd, sizeof cmd, "%s \"%s\"", ed, path);
-	int rc = win_run(cmd);
-	reset_prog_mode();
-	refresh();
-#else
-	/* while the other editor runs, Ctrl-C is its own, not "quit mcm" */
-	struct sigaction ign, old;
-	memset(&ign, 0, sizeof ign);
-	ign.sa_handler = SIG_IGN;
-	sigemptyset(&ign.sa_mask);
-	sigaction(SIGINT, &ign, &old);
-	pid_t pid = fork();
-	if (pid == 0) {
-		signal(SIGINT, SIG_DFL);
-		/* $EDITOR may contain arguments, so let the shell split it */
-		execl("/bin/sh", "sh", "-c", "exec $0 \"$1\"", ed, path, (char *)NULL);
-		_exit(127);
-	}
-	int st = 0;
-	if (pid > 0)
-		while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
-	sigaction(SIGINT, &old, NULL);
-	reset_prog_mode();
-	refresh();
-	int rc = pid < 0 || !WIFEXITED(st) ? -1 : WEXITSTATUS(st);
-#endif
+	int rc = ui_run_editor(path, 0);
 
 	FILE *f = fopen(path, "r");
 	buf_t b = {0};
@@ -987,7 +1220,34 @@ static void mouse(ed_t *e, int *ch)
 {
 	MEVENT ev;
 	*ch = 0;
-	if (getmouse(&ev) != OK || !(ev.bstate & BUTTON1_PRESSED)) return;
+	if (getmouse(&ev) != OK) return;
+	hbar_t *b = &e->hb;
+	if (b->grab >= 0) {                     /* dragging the scroll bar's thumb */
+		hbar_drag_to(e, ev.x - b->grab);
+		if (ev.bstate & BUTTON1_RELEASED) {
+			b->grab = -1;
+			ui_mouse_drag(0);
+		}
+		return;
+	}
+	if (!(ev.bstate & BUTTON1_PRESSED)) return;
+	if (b->len && ev.y == b->y && ev.x >= b->x && ev.x < b->x + b->len) {
+		pane_t *pn = &e->bp;
+		int page = pn->cols - 1;
+		if (ev.x == b->x) pn->hoff -= 8;
+		else if (ev.x == b->x + b->len - 1) pn->hoff += 8;
+		else if (ev.x < b->th) pn->hoff -= page;
+		else if (ev.x >= b->th + b->tsize) pn->hoff += page;
+		else {
+			b->grab = ev.x - b->th;
+			ui_mouse_drag(1);
+			return;
+		}
+		if (pn->hoff > b->n - pn->cols) pn->hoff = b->n - pn->cols;
+		if (pn->hoff < 0) pn->hoff = 0;
+		cursor_into_view(pn);
+		return;
+	}
 	if (ev.y == 0) {
 		if (e->mode == M_CMD) *ch = ui_menu_hit(CMD_MENU, NCMD, ev.x);
 		else *ch = ui_menu_hit(EDIT_MENU, NEDIT, ev.x);
@@ -1003,12 +1263,26 @@ static void mouse(ed_t *e, int *ch)
 			set_mode(e, want);
 			e->msg[0] = '\0';
 		}
+		if (pn->field) {                   /* header: row = line, the field from its column */
+			int i = pn->top + ev.y - pn->y0;
+			if (ev.y < pn->y0 || i >= pn->n) i = pn->n - 1;
+			line_t v;
+			int vx = field_of(pn, i, name_w(pn), &v), col = ev.x - pn->x0 - vx;
+			int hoff = i == pn->cy ? pn->hoff : 0;
+			size_t vs = (size_t)(v.s - pn->l[i].s);
+			pn->cy = i;
+			pn->cx = ev.y < pn->y0 + pn->rows && ev.y >= pn->y0 && i == pn->top + ev.y - pn->y0
+			         ? vs + (col < 0 ? 0 : x_of_col(&v, col + hoff)) : pn->l[i].len;
+			pn->want_col = col_of(&pn->l[i], pn->cx);
+			return;
+		}
 		int y = pn->y0;
 		for (int i = pn->top; i < pn->n && y < pn->y0 + pn->rows; i++) {
 			int h = line_rows(pn, &pn->l[i]);
 			if (ev.y >= y && ev.y < y + h) {
 				pn->cy = i;
 				int col = ev.x - pn->x0;
+				if (pn->nowrap) col += pn->hoff;
 				pn->cx = x_at(pn, &pn->l[i], ev.y - y, col < 0 ? 0 : col);
 				pn->want_col = col_of(&pn->l[i], pn->cx);
 				return;
@@ -1024,11 +1298,41 @@ static void mouse(ed_t *e, int *ch)
 	}
 }
 
+/* Enter in the header window: on Subject to the message; else a new empty
+ * line below for another header ("Reply-To: ..."); on an empty line the
+ * next line (after the last one: the message). */
+static void hdr_enter(ed_t *e)
+{
+	pane_t *p = &e->hp;
+	line_t *l = &p->l[p->cy];
+	size_t n = hdr_name_len(l);
+	if (n == 8 && !strncasecmp(l->s, "Subject:", 8)) {
+		set_mode(e, M_BODY);
+		return;
+	}
+	if (!l->len) {
+		if (p->cy + 1 < p->n) {
+			p->cy++;
+			p->cx = p->l[p->cy].len;
+		} else {
+			set_mode(e, M_BODY);
+		}
+		return;
+	}
+	ins_line(e, p->cy + 1, "", 0);
+	p->cy++;
+	p->cx = 0;
+	e->modified = 1;
+}
+
 static void insert_key(ed_t *e, wint_t wc, int is_key)
 {
 	if (is_key) {
 		switch (wc) {
 		case KEY_BACKSPACE:
+			if (e->p == &e->hp && e->p->cx <= hdr_min(&e->p->l[e->p->cy]) &&
+			    (e->p->cx > 0 || hdr_name_len(&e->p->l[e->p->cy])))
+				break;                                /* not into the header's name */
 			if (e->p->cx > 0) {
 				size_t p = prev_char(&e->p->l[e->p->cy], e->p->cx);
 				del_range(e, p, e->p->cx);
@@ -1040,10 +1344,11 @@ static void insert_key(ed_t *e, wint_t wc, int is_key)
 			break;
 		case KEY_DC:
 			if (e->p->cx < e->p->l[e->p->cy].len) del_range(e, e->p->cx, next_char(&e->p->l[e->p->cy], e->p->cx));
-			else join_next(e, 0);
+			else if (e->p != &e->hp) join_next(e, 0);   /* the next header keeps its own line */
 			break;
 		case KEY_ENTER:
-			split_line(e);
+			if (e->p == &e->hp) hdr_enter(e);
+			else split_line(e);
 			break;
 		default:
 			movement(e, (int)wc);
@@ -1058,7 +1363,12 @@ static void insert_key(ed_t *e, wint_t wc, int is_key)
 		return;
 	}
 	if (wc == 127 || wc == 8) { insert_key(e, KEY_BACKSPACE, 1); return; }
-	if (wc == '\n' || wc == '\r') { split_line(e); e->p->want_col = 0; return; }
+	if (wc == '\n' || wc == '\r') {
+		if (e->p == &e->hp) hdr_enter(e);
+		else split_line(e);
+		e->p->want_col = col_of(&e->p->l[e->p->cy], e->p->cx);
+		return;
+	}
 	if (wc == '\t' && e->mode == M_HDR) { set_mode(e, M_BODY); return; }   /* Tab: to the message */
 	if (wc < 0x20 && wc != '\t') return;
 	uint32_t cp = (uint32_t)wc;
@@ -1067,6 +1377,10 @@ static void insert_key(ed_t *e, wint_t wc, int is_key)
 	utf8_put(&b, cp);
 	ins_bytes(e, b.d, b.len);
 	buf_free(&b);
+	if (e->p == &e->hp && cp == ':' && hdr_name_len(&e->p->l[e->p->cy]) == e->p->cx) {
+		hdr_space(&e->p->l[e->p->cy]);         /* a new header's name is done: "Name: " */
+		e->p->cx++;
+	}
 	if (wc != ' ' && wc != '\t') hard_wrap(e);
 	e->p->want_col = col_of(&e->p->l[e->p->cy], e->p->cx);
 }
@@ -1107,6 +1421,179 @@ static void attach_file(ed_t *e)
 	snprintf(e->msg, sizeof e->msg, "Attached %.200s - to remove it, delete its Attach: line (H, dd)",
 	         base ? base + 1 : path);
 	buf_free(&l);
+	free(path);
+}
+
+/* Open: is t (n bytes, '\n' line ends) an email message? A header block
+ * ("Name: value" lines and their continuations; an mbox "From " line before
+ * it is skipped) that ends in an empty line, with at least one of From, To,
+ * Subject, Date, Message-ID. *start: where the message starts. */
+static int is_message(const char *t, size_t n, size_t *start)
+{
+	size_t p = 0;
+	if (n > 5 && !memcmp(t, "From ", 5)) {
+		const char *nl = memchr(t, '\n', n);
+		if (!nl) return 0;
+		p = (size_t)(nl - t) + 1;
+	}
+	*start = p;
+	int lines = 0, known = 0;
+	while (p < n) {
+		const char *nl = memchr(t + p, '\n', n - p);
+		size_t len = nl ? (size_t)(nl - (t + p)) : n - p;
+		if (!len) return lines > 0 && known;        /* the end of the header */
+		line_t l = {(char *)t + p, len};
+		size_t nm = hdr_name_len(&l);
+		if (nm) {
+			static const char *const k[] = {"From:", "To:", "Subject:", "Date:", "Message-ID:", NULL};
+			for (int i = 0; k[i]; i++)
+				if (nm == strlen(k[i]) && !strncasecmp(l.s, k[i], nm)) known = 1;
+		} else if (!lines || !is_blank(l.s[0])) {
+			return 0;                                   /* neither a header nor its continuation */
+		}
+		lines++;
+		if (!nl) return 0;                              /* no body separator */
+		p += len + 1;
+	}
+	return 0;
+}
+
+/* Index of the header window line "Name: ...", or -1. */
+static int hdr_find(const ed_t *e, const char *name)
+{
+	size_t nl = strlen(name);
+	for (int i = 0; i < e->hp.n; i++)
+		if (hdr_name_len(&e->hp.l[i]) == nl + 1 && !strncasecmp(e->hp.l[i].s, name, nl)) return i;
+	return -1;
+}
+
+static int hdr_filled(const ed_t *e, const char *name)
+{
+	int i = hdr_find(e, name);
+	if (i < 0) return 0;
+	const line_t *l = &e->hp.l[i];
+	for (size_t k = hdr_min(l); k < l->len; k++)
+		if (!is_blank(l->s[k])) return 1;
+	return 0;
+}
+
+/* Set header line "Name: value" (added after the last line if missing). */
+static void hdr_set(ed_t *e, const char *name, const char *value)
+{
+	buf_t b = {0};
+	buf_printf(&b, "%s: %s", name, value);
+	int i = hdr_find(e, name);
+	pane_t *keep = e->p;
+	e->p = &e->hp;
+	if (i < 0) {
+		int at = e->hp.n;
+		while (at > 0 && !e->hp.l[at - 1].len) at--;
+		ins_line(e, at, b.d, b.len);
+	} else {
+		free(e->hp.l[i].s);
+		e->hp.l[i].len = b.len;
+		e->hp.l[i].s = buf_steal(&b);
+	}
+	e->p = keep;
+	buf_free(&b);
+}
+
+/* Put text into the message window: it replaces an empty message, else it
+ * goes in below the cursor line. */
+static void body_insert(ed_t *e, const char *t, size_t n)
+{
+	pane_t *keep = e->p, *bp = &e->bp;
+	e->p = bp;
+	while (n && t[n - 1] == '\n') n--;
+	int empty = 1;
+	for (int i = 0; i < bp->n && empty; i++)
+		if (bp->l[i].len) empty = 0;
+	if (empty) {
+		pane_clear(bp);
+		bp->cy = bp->top = 0;
+	}
+	int at = empty ? 0 : bp->cy + 1, first = at;
+	for (size_t p = 0;;) {
+		const char *nl = memchr(t + p, '\n', n - p);
+		size_t len = nl ? (size_t)(nl - (t + p)) : n - p;
+		ins_line(e, at++, t + p, len);
+		if (!nl) break;
+		p += len + 1;
+	}
+	pane_fix(bp);
+	bp->cy = first;                                    /* on its first line */
+	bp->cx = 0;
+	e->p = keep;
+}
+
+/* O / Open: load a text file. An email message, while To, Cc, Bcc and
+ * Subject are all empty: those four headers go to the header window and
+ * its text to the message. Anything else: the whole file to the message. */
+static void open_file(ed_t *e)
+{
+	static char dir[1024];
+	char *path = ui_file_dialog("Open a text file", dir, sizeof dir, editor_redraw);
+	if (!path) {
+		e->msg[0] = '\0';
+		return;
+	}
+	FILE *f = fopen(path, "rb");
+	buf_t raw = {0};
+	char chunk[65536];
+	size_t r;
+	while (f && (r = fread(chunk, 1, sizeof chunk, f)) > 0 && raw.len < 16u << 20)
+		buf_add(&raw, chunk, r);
+	int err = !f || ferror(f);
+	if (f) fclose(f);
+	const char *base = path;
+	for (const char *c = path; *c; c++)
+		if (*c == '/' || *c == '\\') base = c + 1;
+	if (err || raw.len >= 16u << 20 || (raw.len && memchr(raw.d, '\0', raw.len))) {
+		snprintf(e->msg, sizeof e->msg, err ? "Cannot read %.200s: %s"
+		         : raw.len >= 16u << 20 ? "%.200s is too large (16 MB at most)%s"
+		         : "%.200s is not a text file%s", base, err ? strerror(errno) : "");
+		e->msg_err = 1;
+		buf_free(&raw);
+		free(path);
+		return;
+	}
+	/* lines end in \n */
+	size_t n = 0;
+	for (size_t i = 0; i < raw.len; i++)
+		if (!(raw.d[i] == '\r' && i + 1 < raw.len && raw.d[i + 1] == '\n')) raw.d[n++] = raw.d[i];
+	raw.len = n;
+	buf_cstr(&raw);
+
+	snapshot(e);
+	size_t start;
+	static const char *const H[] = {"To", "Cc", "Bcc", "Subject"};
+	int filled = 0;
+	for (int i = 0; i < 4; i++) filled |= hdr_filled(e, H[i]);
+	if (!filled && is_message(raw.d, raw.len, &start)) {
+		const char *m = raw.d + start;
+		size_t ml = raw.len - start;
+		for (int i = 0; i < 4; i++) {
+			char *v = mime_header(m, ml, H[i]);          /* unfolded, decoded */
+			if (v) {
+				for (char *c = v; *c; c++)
+					if ((unsigned char)*c < 0x20) *c = ' ';
+				hdr_set(e, H[i], v);
+				free(v);
+			}
+		}
+		char *body = mime_render_body(m, ml);
+		body_insert(e, body, strlen(body));
+		free(body);
+		snprintf(e->msg, sizeof e->msg, "Opened %.200s: its To, Cc, Bcc and Subject in the header, its text in the message", base);
+	} else {
+		size_t cl;
+		char *t = utf8_clean(raw.d, raw.len, &cl);   /* other encodings: as Windows-1252 */
+		body_insert(e, t, cl);
+		free(t);
+		snprintf(e->msg, sizeof e->msg, "Opened %.200s in the message", base);
+	}
+	e->modified = 1;
+	buf_free(&raw);
 	free(path);
 }
 
@@ -1175,9 +1662,9 @@ static int command_key(ed_t *e, int ch)
 	case 'Y': yank_lines(e, e->p->cy, 1, 0); break;
 	case 'a': enter_insert(e); e->p->cx = next_char(l, e->p->cx); break;
 	case 'A': enter_insert(e); e->p->cx = l->len; break;
-	case 'o': case 'O':
+	case 'o':                                 /* (O is Open) */
 		enter_insert(e);
-		if (ch == 'o') e->p->cy++;
+		e->p->cy++;
 		ins_line(e, e->p->cy, "", 0);
 		e->p->cx = 0;
 		e->modified = 1;
@@ -1186,12 +1673,13 @@ static int command_key(ed_t *e, int ch)
 	case '0': case '^': e->p->cx = 0; e->p->want_col = 0; break;
 	case '$': e->p->cx = l->len; e->p->want_col = col_of(l, e->p->cx); break;
 	case 'T': case 't': attach_file(e); break;
+	case 'O': open_file(e); break;
 	case 'W': case 'w':
 		e->wrap = !e->wrap;
 		if (e->wrap)
 			snprintf(e->msg, sizeof e->msg, "Wrap on: lines are wrapped at %d columns while typing (gq: re-wrap)", WRAP_COL);
 		else
-			snprintf(e->msg, sizeof e->msg, "Wrap off: lines are not wrapped while typing (gq still works)");
+			snprintf(e->msg, sizeof e->msg, "unWrap: lines are not wrapped; long lines scroll sideways (gq still works)");
 		break;
 	case 'b': word_back(e); break;
 	case 'G': e->p->cy = e->p->n - 1; e->p->cx = 0; break;
@@ -1208,7 +1696,11 @@ static int command_key(ed_t *e, int ch)
 		snapshot(e);
 		del_range(e, e->p->cx, l->len);
 		break;
-	case 'J': snapshot(e); join_next(e, 1); break;
+	case 'J':
+		if (e->p == &e->hp) break;            /* header lines stay apart */
+		snapshot(e);
+		join_next(e, 1);
+		break;
 	case 'p': put_lines(e, 1); break;
 	case 'P': put_lines(e, 0); break;
 	case 'u': undo(e); break;
@@ -1227,6 +1719,9 @@ static int command_key(ed_t *e, int ch)
 void editor_run(const editor_cfg *cfg, const char *text, int start_line)
 {
 	ed_t e = {.cfg = cfg, .wrap = cfg->wrap};
+	e.hp.field = 1;
+	e.hp.hoff_line = -1;
+	e.hb.grab = -1;
 	ed_t *prev = E;
 	E = &e;
 	e.want_line = start_line;
@@ -1276,6 +1771,7 @@ void editor_run(const editor_cfg *cfg, const char *text, int start_line)
 		if (command_key(&e, ch)) break;
 	}
 
+	if (e.hb.grab >= 0) ui_mouse_drag(0);
 	curs_set(0);
 	pane_clear(&e.hp);
 	pane_clear(&e.bp);

@@ -6,6 +6,7 @@
 
 #define THEME_RGB 0x1000000            /* flag: the value is 0xRRGGBB */
 #define DARKBLUE  (THEME_RGB | 0x000040)
+#define THEME_AUTO (-2)                /* TITLE../HEADER.. not set: derived */
 
 typedef struct {
 	int background;    /* BACKGROUND   */
@@ -15,6 +16,10 @@ typedef struct {
 	int menubg;        /* MENUBG       */
 	int menutxt;       /* MENUTXT      */
 	int hotkey;        /* HOTKEY: shortcut letters (default orange) */
+	int titlebg;       /* TITLEBG: title of the active window (default: HIGHLIGHTBG darker) */
+	int titletxt;      /* TITLETXT (default: bright white) */
+	int headerbg;      /* HEADERBG: headers in the message window (default: BACKGROUND lighter) */
+	int headertxt;     /* HEADERTXT (default: TEXT) */
 } theme_t;
 
 void  theme_defaults(theme_t *t);
@@ -24,6 +29,9 @@ char *theme_find(const char *name);
  * copied from the installed theme NAME, or the built-in colors for
  * "default". malloc'd path, or NULL (NAME is a path or unknown). */
 char *theme_user_file(const char *name, int *created);
+/* Names of all themes found (the user's folder, ./themes, the installed
+ * ones), sorted. Returns how many; *out is malloc'd, as is every name. */
+int   theme_names(char ***out);
 /* Load a theme file on top of the current values. Returns 0, or -1 with err set. */
 int   theme_load(theme_t *t, const char *path, char *err, size_t errlen);
 /* Initialise curses color pairs from the theme (after initscr). */

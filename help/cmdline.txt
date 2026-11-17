@@ -73,11 +73,13 @@ WHERE - the kinds of mail mcm reads:
   In local folders and POP3 accounts, Sent and Drafts are made when first used.
 
 Keys (F1 in mcm shows them all):
-  Tab           email list / folders (up to 150 columns)   Enter  open
+  Tab           left window: emails, folders, accounts      Enter  open
   Left / Right  move between the windows
   PgUp/PgDn     page the list       Space / Shift-, Ctrl-, Alt-Space or
                                     Backspace: page the message (down / up)
-  M R F         Mail, Reply, Forward (vim-like editor)   H  headers   X  hex
+  M R F         Mail, Reply, Forward (vim-like editor)
+  H W X         all headers, wrap long lines (or scroll sideways), hex
+  S P T         save the message to ~/Downloads, print it (lp), attachments
   T             in the editor: attach a file (an Attach: line per file)
   A             accounts            C  config (SMTP, wrap width, passwords)
   L             filter the email list on subject or sender (Esc: all again)

@@ -78,7 +78,7 @@ src/helptext.h: $(HELP) tools/txt2c.awk
 	  awk -v name=HELP_KEYS -f tools/txt2c.awk help/keys.txt; \
 	  awk -v name=HELP_EDITOR -f tools/txt2c.awk help/editor.txt; } > $@.tmp && mv $@.tmp $@
 
-src/main.o src/editor.o: src/helptext.h
+src/main.o src/keys.o src/editor.o: src/helptext.h
 
 install: mcm
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(DATADIR)/themes
@@ -131,16 +131,16 @@ win/obj/libpdcurses.a: | win-check
 win/obj/%.o: src/%.c $(wildcard src/*.h) | win/obj/libpdcurses.a
 	$(WIN_CC) $(WIN_FLAGS) $(CFLAGS) -c -o $@ $<
 
-win/obj/main.o win/obj/editor.o: src/helptext.h
+win/obj/main.o win/obj/keys.o win/obj/editor.o: src/helptext.h
 
 win/obj/mcm.res: win/mcm.rc win/mcm.manifest
 	@mkdir -p win/obj
 	cd win && $(WIN_RC) -O coff -o obj/mcm.res mcm.rc
 
-win/mcm/mcm.exe: $(WIN_OBJ) win/obj/libpdcurses.a
+win/mcm/mcm.exe: $(WIN_OBJ) win/obj/libpdcurses.a $(wildcard themes/*.theme)
 	@mkdir -p win/mcm/themes
 	$(WIN_CC) -static -s -o $@ $(WIN_OBJ) win/obj/libpdcurses.a -L$(WIN_LIBDIR) -lssl -lcrypto \
-	  -lz -liconv -lws2_32 -lcrypt32 -lbcrypt -ladvapi32 -luser32 -lgdi32 -lpathcch
+	  -lz -liconv -lws2_32 -lcrypt32 -lbcrypt -ladvapi32 -luser32 -lgdi32 -lpathcch -lshell32
 	cp themes/*.theme win/mcm/themes/
 	cd win && rm -f mcm.zip && { command -v zip >/dev/null && zip -qr mcm.zip mcm || true; }
 

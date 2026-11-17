@@ -8,6 +8,7 @@
 #include <string.h>
 #include <strings.h>
 #include <dirent.h>
+#include <errno.h>
 #include <stdio.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -16,6 +17,9 @@
 #endif
 #include <time.h>
 #include <unistd.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #define KEY_ESC 27
 
@@ -211,6 +215,19 @@ void ui_init(const theme_t *t)
 
 void ui_end(void)
 {
+#ifndef _WIN32
+	/* A terminal without an alternate screen (the Linux console, TERM=linux)
+	 * would keep mcm's screen and colors after it ends: clear it in the
+	 * terminal's own colors first. (xterm and the like switch back to the
+	 * screen they had before.) */
+	const char *rmcup = tigetstr("rmcup");
+	if (!rmcup || rmcup == (char *)-1 || !*rmcup) {
+		attrset(A_NORMAL);
+		bkgdset(' ' | A_NORMAL);              /* color pair 0: the terminal's colors */
+		clear();
+		refresh();
+	}
+#endif
 	curs_set(1);
 	endwin();
 }
@@ -306,7 +323,7 @@ int ui_menu_hit(const ui_menuitem *items, int n, int x)
 		int len = (int)strlen(items[i].label);
 		if (pos + len + 2 > COLS) break;
 		if (x >= pos - 1 && x <= pos + len) return items[i].key;
-		pos += len + 3;
+		pos += len + 2;
 	}
 	return 0;
 }
@@ -329,7 +346,7 @@ void ui_menubar(const ui_menuitem *items, int n, unsigned active)
 				char h[2] = {l[k], 0};
 				ui_puts(0, x + k, h, 1, a | A_BOLD, CP_HOTKEY);
 			}
-		x += len + 3;
+		x += len + 2;              /* two spaces between the items */
 	}
 
 	char clk[64];
@@ -338,7 +355,11 @@ void ui_menubar(const ui_menuitem *items, int n, unsigned active)
 	localtime_r(&now, &tm);
 	strftime(clk, sizeof clk, "%a %d %b %Y  %H:%M:%S", &tm);
 	int cw = (int)strlen(clk);
-	if (COLS - cw - 1 > x) ui_puts(0, COLS - cw - 1, clk, cw, 0, CP_MENU);
+	/* x is 2 past the last item: the clock at least 2 columns after it,
+	 * one column from the right edge, or against it when that is short */
+	int cx = COLS - cw - 1;
+	if (cx < x) cx = COLS - cw;
+	if (cx >= x) ui_puts(0, cx, clk, cw, 0, CP_MENU);
 }
 
 /* ------------------------------------------------------------------ */
@@ -489,9 +510,32 @@ int ui_confirm(const char *title, const char *msg, ui_bg_fn bg)
 	return ch == 'y' || ch == 'Y' || ch == '\n' || ch == '\r';
 }
 
+/* Scroll bar of the text dialog: in its right border, rows y .. y+h-1. */
+typedef struct { int x, y, h, t0, tlen, th, tsize; } dlg_sbar;
+
+static void dlg_scrollbar(dlg_sbar *b, int x, int y, int h, int n, int rows, int top)
+{
+	b->x = x;
+	b->y = y;
+	b->h = h;
+	b->t0 = y + 1;
+	b->tlen = h - 2;
+	b->tsize = b->tlen * rows / n;
+	if (b->tsize < 1) b->tsize = 1;
+	int range = n - rows, free_rows = b->tlen - b->tsize;
+	b->th = b->t0 + (range > 0 ? (top * free_rows + range / 2) / range : 0);
+	ui_puts(y, x, "▲", 1, 0, CP_MENU);
+	ui_puts(y + h - 1, x, "▼", 1, 0, CP_MENU);
+	for (int r = 0; r < b->tlen; r++) {
+		int on = b->t0 + r >= b->th && b->t0 + r < b->th + b->tsize;
+		ui_puts(b->t0 + r, x, on ? "█" : "░", 1, 0, CP_MENU);
+	}
+}
+
 void ui_text_dialog(const char *title, const char *const *lines, int n, ui_bg_fn bg)
 {
-	int w = 0, top = 0;
+	int w = 0, top = 0, grab = -1;   /* grab: dragging the thumb (row offset), -1 not */
+	dlg_sbar sb = {0};
 	for (int i = 0; i < n; i++) {
 		wchar_t *ws;
 		size_t wn = utf8_to_wcs(lines[i], strlen(lines[i]), &ws);
@@ -503,7 +547,7 @@ void ui_text_dialog(const char *title, const char *const *lines, int n, ui_bg_fn
 	w += 6;
 	timeout(1000);   /* keep the clock ticking */
 	for (;;) {
-		/* longer than the screen: it scrolls */
+		/* longer than the screen: it scrolls, with a scroll bar */
 		int rows = n, maxrows = LINES - 6;
 		if (maxrows < 1) maxrows = 1;
 		if (rows > maxrows) rows = maxrows;
@@ -514,25 +558,52 @@ void ui_text_dialog(const char *title, const char *const *lines, int n, ui_bg_fn
 		dialog_frame(rows + 4, w, title, &y0, &x0, bg);
 		for (int i = 0; i < rows; i++)
 			ui_puts(y0 + 2 + i, x0 + 3, lines[top + i], w - 6, 0, CP_MENU);
+		sb.h = 0;
 		if (scroll) {
 			char hint[80];
-			snprintf(hint, sizeof hint, " %d-%d of %d  \u2191\u2193 PgUp PgDn  Esc close ", top + 1,
+			snprintf(hint, sizeof hint, " %d-%d of %d  ↑↓ PgUp PgDn  Esc close ", top + 1,
 			         top + rows, n);
 			ui_box_hint(y0, x0, rows + 4, w, hint, CP_MENU);
+			if (rows + 2 >= 4) {
+				int bw = w > COLS ? COLS : w;
+				dlg_scrollbar(&sb, x0 + bw - 1, y0 + 1, rows + 2, n, rows, top);
+			}
 		}
 		refresh();
 		int ch = ui_getch();
 		if (ch == ERR || ch == KEY_RESIZE) continue;
+		int page = rows > 1 ? rows - 1 : 1;
 		if (ch == KEY_MOUSE) {
 			MEVENT ev;
 			if (getmouse(&ev) != OK) continue;
+			if (grab >= 0) {                     /* the thumb follows the mouse */
+				int fr = sb.tlen - sb.tsize, p = ev.y - grab - sb.t0;
+				if (p < 0) p = 0;
+				if (p > fr) p = fr;
+				top = fr > 0 ? (p * (n - rows) + fr / 2) / fr : 0;
+				if (ev.bstate & BUTTON1_RELEASED) {
+					grab = -1;
+					ui_mouse_drag(0);
+				}
+				continue;
+			}
 			if (ev.bstate & BUTTON4_PRESSED) { top -= 3; continue; }
 			if (ev.bstate & BUTTON5_PRESSED) { top += 3; continue; }
 			if (!(ev.bstate & BUTTON1_PRESSED)) continue;
-			break;
+			if (sb.h && ev.x == sb.x && ev.y >= sb.y && ev.y < sb.y + sb.h) {
+				if (ev.y == sb.y) top--;
+				else if (ev.y == sb.y + sb.h - 1) top++;
+				else if (ev.y < sb.th) top -= page;
+				else if (ev.y >= sb.th + sb.tsize) top += page;
+				else {
+					grab = ev.y - sb.th;
+					ui_mouse_drag(1);
+				}
+				continue;
+			}
+			break;                               /* a click elsewhere closes it */
 		}
 		if (!scroll) break;
-		int page = rows > 1 ? rows - 1 : 1;
 		if (ch == KEY_UP || ch == 'k') top--;
 		else if (ch == KEY_DOWN || ch == 'j') top++;
 		else if (ch == KEY_PPAGE || ch == KEY_BACKSPACE || ch == 127) top -= page;
@@ -541,6 +612,7 @@ void ui_text_dialog(const char *title, const char *const *lines, int n, ui_bg_fn
 		else if (ch == KEY_END) top = n;
 		else break;
 	}
+	if (grab >= 0) ui_mouse_drag(0);
 	timeout(-1);
 }
 
@@ -803,4 +875,60 @@ char *ui_file_dialog(const char *title, char *dir, size_t dirsize, ui_bg_fn bg)
 		snprintf(dir, dirsize, "%s", pick);
 		free(pick);
 	}
+}
+
+/* Run $VISUAL or $EDITOR (vi; Windows: Notepad) on the file at path, with
+ * curses put aside meanwhile. readonly: vi, vim, nvim and view get -R.
+ * Returns the editor's exit status, -1 when it could not run. */
+int ui_run_editor(const char *path, int readonly)
+{
+	const char *ed = getenv("VISUAL");
+	if (!ed || !*ed) ed = getenv("EDITOR");
+#ifdef _WIN32
+	if (!ed || !*ed) ed = "notepad";
+#else
+	if (!ed || !*ed) ed = "vi";
+#endif
+	/* the program's name: the first word of the command, without its folder */
+	const char *name = ed, *sp = ed + strcspn(ed, " \t");
+	for (const char *c = ed; c < sp; c++)
+		if (*c == '/' || *c == '\\') name = c + 1;
+	size_t nl = (size_t)(sp - name);
+	int vi = (nl == 2 && !strncmp(name, "vi", 2)) || (nl == 3 && !strncmp(name, "vim", 3)) ||
+	         (nl == 4 && (!strncmp(name, "nvim", 4) || !strncmp(name, "view", 4))) ||
+	         (nl == 7 && !strncasecmp(name, "vim.exe", 7));
+	const char *flag = readonly && vi ? "-R" : "";
+
+	def_prog_mode();
+	endwin();
+#ifdef _WIN32
+	/* $EDITOR may contain arguments: it is the start of the command line */
+	char cmd[1200];
+	snprintf(cmd, sizeof cmd, "%s %s \"%s\"", ed, flag, path);
+	int rc = win_run(cmd);
+	reset_prog_mode();
+	refresh();
+	return rc;
+#else
+	/* while the editor runs, Ctrl-C is its own, not "quit mcm" */
+	struct sigaction ign, old;
+	memset(&ign, 0, sizeof ign);
+	ign.sa_handler = SIG_IGN;
+	sigemptyset(&ign.sa_mask);
+	sigaction(SIGINT, &ign, &old);
+	pid_t pid = fork();
+	if (pid == 0) {
+		signal(SIGINT, SIG_DFL);
+		/* $EDITOR may contain arguments, so let the shell split it */
+		execl("/bin/sh", "sh", "-c", "exec $0 $2 \"$1\"", ed, path, flag, (char *)NULL);
+		_exit(127);
+	}
+	int st = 0;
+	if (pid > 0)
+		while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+	sigaction(SIGINT, &old, NULL);
+	reset_prog_mode();
+	refresh();
+	return pid < 0 || !WIFEXITED(st) ? -1 : WEXITSTATUS(st);
+#endif
 }

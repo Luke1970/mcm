@@ -1,30 +1,95 @@
 # Help window shown by F1 or ? in mcm. Edit it, then run make (see cmdline.txt).
 Mail Commander (mcm) @VERSION@ - console mail client
 
-Tab                  switch the left window: email list / folders
-                     (more than 150 columns: all three are shown)
-Left / Right         move between the windows
-Up / Down            move selection / scroll message
+Author: Lucien van Lint - mcm@sc00by.nl
+Co-author: Claude Code
+
+MCM basically has 4 windows. From left to right:
+Accounts | Folder list | Email list | Email body
+
+Basic usage:
+
+In a terminal with 80 characters width, only the email list (Folder INBOX) 
+and the window with the Email body (Message) will be shown. When expanding 
+the width of the terminal, also the Folder list will appear and when 
+expanding more also the window with accounts will show.
+
+ Quit  Mail  Reply  Forward  Account  Config  F1=Help 
+┌─ INBOX  8152 msgs, 1028 new ─┐┌─ Message  56% ────────────────────────┐ 
+│  Morgen de laats 261115.19:31▲│From     KRSTBM <mail@krstbm.nl>       ▲ 
+│  Undelivered Mai 261115.17:58█│To       "L. van Lint" <lucien@sc00by.n█ 
+│  Welk vaatwasmid 261115.17:40░│Date     Sun, 15 Nov 2026 18:31:12 +000█ 
+│  E-mail-alert-bo 261115.17:16░│Subject  Morgen de laatste dag 7% korti█ 
+│  Member Presale  261115.17:11░│                                       █ 
+│  Message from HC 261115.16:49░│Daarna gaat de korting naar 5%. Bezorgw█ 
+│  How CNN honors  261115.16:13░│                                       █ 
+│  (no subject)    261115.15:43░│Gratis bezorging in 17 regio's  ·  Vers█ 
+│  (no subject)    261115.15:39░│                                       █ 
+│  Re: width       261115.15:24░│[KRSTBM](https://krstbm.nl)            █ 
+│A width           261115.15:22░>[Verse Nordmann-kerstbomen]            █ 
+│  Thuisbatterij-r 261115.14:46░│Morgen de laatste dag                  ░ 
+│  7 cheap(ish) ki 261115.14:31░│                                       ░ 
+│  😳 You're Reall 261115.14:30░│Bezorgweken lopen vol.                 ░ 
+│  [GitHub] Please 261115.14:08░│                                       ░ 
+│  [GitHub] Please 261115.14:08░│Beste L.,                              ░ 
+│  Fwd: Uw aanvraa 261115.13:42░│                                       ░ 
+│  De zorgpremies  261115.13:38░│Code KERST7 is nog geldig t/m morgen 23░ 
+│  💡 Is envy more 261115.13:07░│                                       ░ 
+│  Fwd: Beveiligin 261115.13:04░│Uw code                                ░ 
+│  Beveiligingsmel 261115.13:03▼│KERST7                                 ▼ 
+└─L────── TAB=Folder|Accounts ─┘└─H─W─X─S─P─T─◄█░░░░░░░░░░░░░░░░░░░░░░░►┘  
+mcm@sc00by.nl  Enter Open  F5 Refresh  Q/^Q Quit
+
+
+Tab                  When not all windows are shown, TAB will cycle
+                     the left window with the missing windows. Tn the 
+                     example above the list of emails, can be replaced 
+                     with the list of mail folders and the list of 
+                     accounts by pressing TAB
+Left / Right         Selects which window is focused, and makes the 
+                     left window alternate with windows not shown.
+Up / Down            move selection / scroll message 
 PgUp / PgDn          page through the message list
 Space                page down in the message (from every window)
+B                    page up in the message (in the message window)
+:                    vim-like command in the message window:
+                     :e         the message in $EDITOR (vim -R, read only)
+                     :q         quit mcm (also :q! :qa :x :wq)
+                     :w [FILE]  save the message (no FILE: as S), :w! replaces
+                     :N :+N :-N :$   go to line N, N lines on/back, end
+                     :/text :?text   search on / back (any case),
+                                     matches highlighted until :noh
+                     :set wrap  :set nowrap  :hardcopy (print)  :h (help)
 Shift-/Ctrl-/Alt-Space, Bksp
-                     page up in the message (from every window;
-                     many terminals send Shift-Space as Space:
-                     use Ctrl-Space, Alt-Space or Backspace there)
+                     page up in the message Many terminals and 
+                     desktop environments have reserved Shift-Space or
+                     convert it with Space. Use Ctrl-Space, Alt-Space 
+                     or Backspace as a alternative)
 Home / End           first / last
 Enter                open folder / read message
 Esc                  back to message list
 
-H  Header            toggle full message headers
-X  heX               toggle hex dump of raw message
-M R F                Mail / Reply / Forward (opens the editor;
+Selections available for Message window, 
+as shown on bottom of window H W X S P T:
+                     H  Toggle between all headers and short header info
+                     W  wrap/unwrap long lines.
+                     X  switch between hex dump and regular view.
+                     S  save the message as shown in ~/Downloads
+                        (or ~): mcm--FROM--DATE--SUBJECT.txt
+                     P  print the message (lp)
+                     T  attachments: open one (in the desktop's
+                        viewer) or save it in ~/Downloads
+
+Selections available for list with emails:
+                     L  Shows filter. Enter keyword, press enter.
+                        Esc leaves filter.
+
+M R F (T)               Mail / Reply / Forward (opens the editor;
                      T there attaches a file)
+
 A  Account           switch account, name, full name, password
-C  Config            SMTP, account, wrap width, delete passwords
+C  Config            SMTP, account, wrap width, theme, passwords
 Ctrl-← / Ctrl-→      narrower / wider left column (or drag the border)
-L  fiLter            show only emails whose subject or sender
-                     contains a text; Enter applies, Esc leaves
-                     the filter (also in the email list)
 F5                   refresh folder (new mail)
 Ctrl-L               redraw screen
 F1 / ?               this help
@@ -32,17 +97,26 @@ Q                    quit
 Ctrl-Q / Ctrl-C      quit at once, from anywhere (also in dialogs and
                      the editor; text being written is saved in
                      ~/.local/share/mcm/unsent-DATE.txt). Ctrl-C also
-                     stops a network wait; twice: leave immediately
+                     stops when program is not waiting for keyboard
+                     input.
 Mouse                click the list's bottom border to filter
                      (Esc=Leave there ends it);
                      click an email or folder to select it, double
-                     click to open it; click a menu bar item; drag
-                     the column border; scroll bar: ▲ ▼ line, track
-                     page, drag the thumb; the wheel scrolls the
-                     message and the lists (a key brings a list
-                     back to its selection)
+                     click to open it; click a menu bar item, L on the
+                     list border or H W X S P T on the message border;
+                     drag the column border;
+                     scroll bars (every window that needs one, and
+                     this help): ▲ ▼ line, track page, drag the thumb;
+                     the wheel scrolls the message, the lists and this
+                     help (a key brings a list back to its selection)
 
 Message list: N = new, A = answered, * = flagged, D = deleted
+
+Author: Lucien van Lint 
+email:  mcm@sc00by.nl
+Co-authow: Claude Code
+
+The source is released with a GPL3 license.
 
 Libraries and software used:
   ncurses       screen, keys and mouse - Zeyd M. Ben-Halim,

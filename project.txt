@@ -27,9 +27,13 @@ The README describes the same program for its users.
   Linux and OpenBSD 8.0; the Windows build under Wine.
 - Fully usable from the keyboard; the mouse is optional.
 - Smallest supported terminal: 80 x 25.
+- On exit (ui_end) a terminal without an alternate screen (no rmcup, e.g.
+  the Linux console, TERM=linux) is cleared in its own colors, so mcm's
+  screen and background do not stay behind.
 - Licence: GPLv3.
-- Version number in src/main.c (MCM_VERSION). Every change request raises it
-  by 0.01 (0.9, 0.91, 0.92, ...). It is shown in the menu bar, by `mcm -V`, in the help texts
+- Version number in src/mcm.h (MCM_VERSION). Every change request raises it
+  by 0.001 since 0.95 (0.951, 0.952, ...; the changes after 0.95 were
+  renumbered 0.951-0.957). It is shown in the menu bar, by `mcm -V`, in the help texts
   (@VERSION@) and in the User-Agent header (`mcm/VERSION (Mail Commander)`).
 
 
@@ -94,7 +98,7 @@ The README describes the same program for its users.
     pread, getline, strcasestr, memmem, asprintf, a wcwidth of 1 (PDCurses
     gives every character one cell), timegm (_mkgmtime), the computer name,
     mbox locking with LockFileEx, running a command and waiting (the
-    external editor, default notepad; restarting on another account).
+    external editor, default notepad).
   wchar_t is 16 bits: characters above U+FFFF are shown as U+FFFD; typed
   ones arrive as two UTF-16 halves and are joined (utf16_join) before they
   are stored as UTF-8. 256 colors: PDC_set_blink(FALSE) after start_color
@@ -151,10 +155,12 @@ section per account:
 
   theme = default
   wrap_width = 72            (20-998)
+  message_wrap = 1           W: long message lines wrapped (1) or not (0)
   folders_width = 25         percent of the screen
-  list_width = 45            percent (with three columns: of what is left)
+  list_width = 45            percent (with three or four columns: of what is left)
+  accounts_width = 15        percent of the screen (four columns)
   last_account = Work
-  master_check = enc1$...    the word "mcm" encrypted with the master password
+  master_check = enc1$...    the word "emsg" encrypted with the master password
 
   [account Work]
   type = imap | pop3 | local
@@ -180,7 +186,12 @@ section per account:
   path; default path is the first of ~/Maildir, ~/Mail, ~/mail, $MAIL.
 - A (Account) lists the accounts; the current one is marked *. Enter on it
   changes name, full name and stored password; Enter on another one or on
-  "New account" restarts mcm with that account.
+  "New account" switches to that account inside the running program
+  (leave_account closes folders, messages, connection and the SMTP
+  password; do_login; open_start_folder). The master password stays in
+  memory, so it is asked once per run, at start. A cancelled or failed
+  login goes back to the previous account; a new account that was not made
+  is dropped.
 - On startup INBOX is opened and the newest message is shown.
 
 
@@ -262,25 +273,78 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.95 Quit Mail Reply Forward heX Header Account Config F1=Help  date time
+  mcm 0.974 Quit Mail Reply Forward Account Config F1=Help  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
   |                                      <>Hello,                        v
-  +------------- TAB=Folders  PgUp/PgDn -++--- Spc=PgDn Shift+Spc/Bksp=PgUp-+
-   user@host  F1 Help  Tab Folders/Emails  <-> Column  Enter Open  F5 Refresh
+  +-L-- TAB=Folder|Accounts  PgUp/PgDn -++-H-W-X-S-P-T------------ Spc=PgDn B=PgUp -+
+   user@host  Enter Open  F5 Refresh  Q/^Q Quit
 
 - Top line: menu bar with the context menu and the clock on the right.
-  Hotkey letters in the HOTKEY color; a mode that is on (heX, Header) is
-  drawn inverted. A click on an item runs it.
-- Three windows: Folders, the email list, the message.
-    up to 150 columns: two windows; left the email list OR the folders,
-      right always the message. Tab switches the left window.
-    more than 150 columns: Folders | List | Message side by side.
+  Hotkey letters in the HOTKEY color. A click on an item runs it. (Header
+  and heX left the menu in 0.956: they are H and X on the message border.)
+- ':' in the message window (msg_colon in msgwin.c): a command line on the
+  bottom line. :e/:view/:vi/:vim -> view_in_editor(): the text as shown
+  (whole message loaded) in a 0600 temp file (mkstemps; Windows
+  %TEMP%\mcm-view-PID-N.txt), ui_run_editor(path, 1) (vi/vim/nvim/view get
+  -R), then deleted. :q :q! :qa :x :wq -> quit. :w = S, :w FILE (O_EXCL,
+  :w! O_TRUNC; ~ expanded), :hardcopy = P, :set [no]wrap / wrap! = W,
+  :N :+N :-N (text lines, headers included) :$, :/text :?text (ASCII any
+  case, wraps around, empty = last; A.srch), :h help. After a search
+  A.hls = 1: draw_text_line paints every match (towlower compare on the
+  tab-expanded wide line, within one display line) in CP_HIGHLIGHT, in
+  every message, until :noh.
+- ui_run_editor() (ui.c): $VISUAL/$EDITOR via sh -c "exec $0 $2 \"$1\""
+  (Windows win_run), SIGINT ignored meanwhile; also used by the editor's :e.
+- Status line: "Enter Open  F5 Refresh  Q/^Q Quit" in every layout (no
+  F1, Tab, column or L hint: F1=Help is in the menu bar, L on the list's
+  border). With the focus on the message window it shows the ':' commands
+  instead: ":e Vim  :/text Search  :N Line  :w Save  :q Quit".
+- Menu bar items are 2 columns apart (ui_menubar, ui_menu_hit); the clock
+  keeps at least 2 columns from the last item (on 80 columns it moves to
+  the right edge, so it still fits).
+- List bottom border: L at its left (bold, inverted while a filter is
+  typed or applied; a click = L), the filter bar right of it.
+- Message window bottom border: H W X S P T at its left (bold; H W X
+  inverted while on: H all headers, W wrapped lines, X hex dump; S save,
+  P print, T attachments; a click = the key). W also switches H and X off. Then,
+  with W off and a line wider than the window, a horizontal scroll bar
+  (draw_hscrollbar, sbs[SB_HMSG]: arrows 8 columns, track a page, drag the
+  thumb) up to the corner; otherwise the paging hint on the right.
+- W on (message_wrap = 1, default): lines wrapped at the window width, at
+  most 76 columns (WRAP_VIEW). W off: lines not wrapped; A.hoff is the
+  first column shown, A.maxw the widest line. Toggling W keeps the text at
+  the top of the window in view. Left/Right in e move the text 8 columns
+  (HSTEP); Left at column 0 goes to the window on the left.
+- Help window (F1): a scroll bar in its right border when it does not fit
+  (arrows, track, drag the thumb); the wheel scrolls it; a click elsewhere
+  closes it.
+- Four windows: a Accounts, f Folders, l the email list, e the message.
+    up to 150 columns: two windows; e always on the right, on the left l, f
+      or a. Tab: l -> f -> a -> l; Shift-Tab the other way.
+    151-170 columns: f (or a) | l | e side by side; Tab switches the
+      first window between f and a.
+    more than 170 columns (FULL_COLS): a | f | l | e; Tab does nothing and
+      no border shows a TAB= hint (Folders/Accounts: Enter=Select only;
+      status line without Tab). Left/Right walk e -> l -> f -> a and back.
+      Three borders can be dragged: a|f sets accounts_width, f|l
+      folders_width, l|e list_width (of what a and f leave).
+    A window left of e is at least 25 columns wide (MIN_LEFT).
+- Accounts window: one row per account, "NAME  user@host" (POP3 marked),
+  or "NAME  path" for local mail; the current one marked '>' and bold; the
+  last row "New account ...". Enter / double click: the current account
+  shows its folders, another one is switched to (as A), New account
+  sets one up. Right or Esc: to the email list. Wheel and scroll bar scroll it.
 - Box-drawing borders. The window title holds the folder name, number of
   messages and new ones. The bottom border shows the window's keys
-  (Folders: Enter=Select, plus TAB=Emails when it fits; list: TAB=Folders
-  PgUp/PgDn; message: Spc=PgDn Shift+Spc/Bksp=PgUp).
+  (two columns, TAB=where Tab|Shift-Tab go: list "L ...
+  TAB=Folder|Accounts PgUp/PgDn"; Folders "Enter=Select  TAB=Account|Email";
+  Accounts "Enter=Select  TAB=Email|Folder"; a narrow Folders/Accounts
+  window drops Enter=Select first. Three columns: Folders TAB=Accounts,
+  Accounts TAB=Folders, list "L ... PgUp/PgDn". Message: Spc=PgDn
+  B=PgUp; B pages up only while the message window has the focus, Space,
+  Shift/Ctrl/Alt-Space and Backspace work from every window).
 - The border between list and message is marked <>. Widths change with
   Ctrl-Left / Ctrl-Right or by dragging a border with the mouse; they are
   saved as percentages so they fit after a resize.
@@ -291,8 +355,11 @@ Local (src/local.c):
 - Folder list: tree, indented per level; folders that cannot be selected
   are shown but not opened.
 - The message window shows From, To, Cc, Date and Subject, an empty line,
-  then the text. A long message has a scroll bar in its right border
-  (arrows, track, thumb).
+  then the text.
+- Scroll bars: every window (l, f, a, e) whose lines do not fit gets one in
+  its right border (arrows, track, thumb), drawn by draw_scrollbar(col, ...)
+  into sbs[col]. Where the list has one, the '<' of the <> mark is left out.
+  A press on a scroll bar goes before dragging the column border there.
 - Dialogs (login, choices, lists, messages, progress, file picker) are
   boxes drawn over the screen; the screen behind them is redrawn.
 - The screen follows terminal resizes.
@@ -302,8 +369,10 @@ Local (src/local.c):
 --------
 
 Main screen:
-  Tab                  switch the left window (email list / folders)
-  Left / Right         move between the windows
+  Tab / Shift-Tab      left window l -> f -> a -> l (back); 3 columns: f <-> a
+  Left / Right         move between the windows (Left: e -> l -> f -> a,
+                       Right back, in every layout); in e with W off: move the
+                       text sideways (Left at column 0: window on the left)
   Up / Down            move selection / scroll the message
   PgUp / PgDn          page the list
   Home / End           first / last
@@ -314,10 +383,31 @@ Main screen:
                        page up in the message, from every window
   M R F                Mail, Reply, Forward (opens the editor)
   H                    full headers on/off
+  W                    wrap message lines (max 76 columns) on/off; H and
+                       X off
+  S                    save the message (as shown) in ~/Downloads or ~:
+                       mcm--FROM--YYYY-MM-DD--SUBJECT.txt, mode 0600,
+                       never overwrites (-2, -3, ...); rest fetched first
+  T                    attachments: list (ui_list_dialog), then Open or
+                       Save. IMAP: from BODYSTRUCTURE (mv_attachments,
+                       the parts shown as [Attachment]), only the chosen
+                       part fetched (mv_fetch_part, 1 MB blocks) and
+                       decoded (mime_decode_cte). Local/POP3: the raw
+                       message parsed (mime_attachments). Open: a 0600
+                       file in $XDG_RUNTIME_DIR/mcm-attachments (or
+                       ~/.cache/..., Windows %TEMP%), xdg-open in a
+                       detached grandchild (Windows ShellExecute);
+                       folder emptied at start and end (Windows: start).
+                       Program files (att_runnable) only saved. Save:
+                       ~/Downloads or ~, like S. Names: no folders, a
+                       leading dot becomes _, -2 -3 against overwriting.
+  P                    print it: lp -s (127: "lp is not installed");
+                       Windows: temp file, notepad /p
   X                    hex dump of the raw message on/off
   A                    accounts
   C                    config: outgoing mail (SMTP), account, switch
-                       account, wrap width, delete all stored passwords
+                       account, wrap width, theme, delete all stored
+                       passwords
   Ctrl-Left/Right      narrower / wider left column
   L                    filter the email list (see 15a)
   F5                   refresh (new mail)
@@ -353,10 +443,15 @@ file picker and the editor, without questions:
 - Click on an email or folder: selects it and focuses that window. A double
   click (same row within 400 ms) opens it, like Enter.
 - Drag a column border to resize.
-- Scroll bar: arrow = one line, track = one page, drag the thumb.
-- Wheel: over the message 3 lines; over the email list or folder list it
-  scrolls that list 3 lines without changing the selection or the open
-  message. The next key or click brings the list back to the selection.
+- H, W, X on the message's bottom border: like the keys.
+- Scroll bar (any window, the help window, and the horizontal one under
+  an unwrapped message): arrow = one line, track = one page, drag the
+  thumb (on a huge folder only the headers around the new position are
+  fetched).
+- Wheel: over the message 3 lines; over the email list, folders or accounts
+  it scrolls that list 3 lines. Wheel and scroll bar leave the selection
+  and the open message as they are; the next key or click brings the list
+  back to the selection.
 - In the editor: click a menu item, or anywhere in either window to edit
   there.
 
@@ -369,7 +464,17 @@ file picker and the editor, without questions:
   ./themes/NAME.theme, $(PREFIX)/share/mcm/themes/NAME.theme, or the
   built-in default colors.
 - Keys: BACKGROUND, TEXT, HIGHLIGHTBG, HIGHLIGHTTXT, MENUBG, MENUTXT,
-  HOTKEY.
+  HOTKEY, TITLEBG, TITLETXT, HEADERBG, HEADERTXT.
+- Active window title (main screen and editor): pair CP_TITLE, TITLETXT on
+  TITLEBG; unset (THEME_AUTO) = bright white (15) on HIGHLIGHTBG at 60%
+  brightness (darker() in theme.c; cyan -> #007b7b, color 30 on 256-color
+  terminals, cyan again on 8 colors). The selection bar keeps HIGHLIGHTBG.
+- Message window header section: pair CP_HEADER, HEADERTXT on HEADERBG,
+  for display lines with offset < mv.hdr_end (set by mv_render: the end of
+  the summary or of all headers, without the blank line). Unset = TEXT on
+  BACKGROUND lighter (lighter() in theme.c: each component *2+32,
+  darkblue -> #2020a0, color 19 on 256 colors); if that fits to the
+  same color as BACKGROUND (8 colors, default) the text is cyan instead.
 - Colors: black red green yellow blue magenta cyan white, optional
   bright/light prefix, gray, darkgray, darkblue (#000040), navy, orange,
   default (the terminal's color), 0-255, #RRGGBB.
@@ -378,7 +483,16 @@ file picker and the editor, without questions:
   COLORTERM=truecolor/24bit the xterm-direct description is used, unless
   MCM_NO_DIRECT=1.
 - Shipped: default (PC Tools: white on dark blue, cyan bar, light gray
-  menu, orange hotkeys), mc, dark, mono.
+  menu, orange hotkeys), mc, dark, mono, eink (black on white, grays
+  only; black menus, gray bar so bold hotkeys stay readable), night (dark
+  red #870000 on black, no blue/white; chosen to map to 52/88/124/160 on
+  256 colors), amber, green (monochrome monitors), paper (light).
+- Config -> Theme: theme_names() (theme.c) lists NAME.theme in the user's
+  folder, ./themes and DATADIR/themes, sorted, no duplicates; the choice is
+  loaded with load_theme() (account.c, also used at start), applied with
+  theme_apply() + clear(), and saved as theme = in mcm.conf.
+- Windows: win/mcm/mcm.exe depends on themes/*.theme, so a changed theme
+  is copied and packed again.
 
 
 14. Showing messages
@@ -388,6 +502,9 @@ file picker and the editor, without questions:
   charset through iconv, shown as UTF-8 with correct wide characters.
 - MIME: multipart, base64, quoted-printable. A plain-text part is shown
   when there is one; otherwise HTML or Markdown is converted to text.
+  An empty plain-text alternative (at most 8 encoded octets / non-blank
+  characters, e.g. some newsletters) counts as none: the HTML is shown
+  (msgview.c walk and mime.c render_part).
   Attachments are listed with name, type and size, not downloaded.
 - format=flowed (RFC 3676): soft breaks joined into paragraphs (per quote
   level), space-stuffing removed, DelSp=yes honoured, wrapped to the window.
@@ -409,7 +526,8 @@ file picker and the editor, without questions:
   lose their markers; # headings underlined (levels 1-2); links and images
   as with HTML; fenced (``` ~~~) and indented code kept as written,
   indented by 4; lists and quotes unchanged; backslash escapes.
-- H shows all headers; X shows a hex dump of the raw message.
+- H shows all headers; W wraps long lines (max 76 columns) or not; X shows
+  a hex dump of the raw message.
 - The converters must survive any input (fuzzed) and be fast (800 KB in
   well under a second).
 
@@ -417,7 +535,7 @@ file picker and the editor, without questions:
 15a. Filter
 -----------
 
-- The email list's bottom border shows "fiLter" (L in the hotkey color).
+- The email list's bottom border starts with L (inverted while filtering).
   L (from any window; the list gets the focus) opens a filter bar in that
   border: "Filter: text  Enter=Apply  Esc=Leave". Typed text appends,
   Backspace deletes a character, Ctrl-U all of it.
@@ -468,23 +586,44 @@ Editor (vim-like):
   send check (valid UTF-8, no controls) would refuse it. HTML &#128;-&#159;
   are Windows-1252 too, as in HTML5.
 - Two windows: header on top, message below. It opens in the header window;
-  Enter adds a header line. Tab goes to the message text; Esc (header or message) to command
+  Tab goes to the message text; Esc (header or message) to command
   mode. Down on the last header line goes to the message, Up on the first
   message line to the header (also from command mode, which then edits).
+- The header window is a form (pane_t.field): one row per line, "Name:"
+  bold in a column as wide as the longest name (at most half the width),
+  the field after it. Names cannot be edited: the cursor stays at or after
+  hdr_min() (after "Name:" and its blanks; "Name:x" is stored as
+  "Name: x"), Backspace stops there, Delete at the end does not join the
+  next header, J does nothing there. A field wider than its room scrolls
+  sideways with the cursor (pane hoff, only on the cursor line); other
+  lines end in "…" when cut. Enter on Subject: to the message; on another
+  line: a new empty line below; on an empty line: the next line (after the
+  last: the message). A new line has no name yet and is edited from the
+  left; typing its ':' makes it "Name: " and fixes the name.
 - While the header or the message is edited the menu bar shows
-  Esc=leaveEdit EdIt Send Keep Header Wrap aTtach for the mouse; a click
+  Esc=leaveEdit EdIt Send Keep Header Wrap aTtach Open for the mouse; a click
   leaves editing and runs the command (Esc=leaveEdit goes to command mode). The status line shows the
   mode, its keys and Ln/Col.
 - A mouse click anywhere in the header or message window (text, empty part,
   frame) makes it the window being edited; below the text the cursor goes
   to the last line. The mouse button release must not clear a message.
-- Command mode menu: EdIt Send Keep Header Wrap aTtach.
-    E / I (i a A o O)   edit again
+- Command mode menu: EdIt Send Keep Header Wrap aTtach Open.
+    E / I (i a A o)     edit again
     S                   send (confirm recipients first)
     K                   keep: save in Drafts and close
     H                   header window
     W                   wrap while typing on/off
     T                   attach a file
+    O                   open a text file (open_file): an email message
+                        (is_message: header lines, an empty line, one of
+                        From/To/Subject/Date/Message-ID; mbox "From "
+                        skipped) while To, Cc, Bcc and Subject are all
+                        empty: those four (decoded) to the header, the
+                        body (mime_render_body) to the message. Else the
+                        whole file (utf8_clean) to the message. Text goes
+                        into an empty message, or below the cursor line.
+                        No NUL bytes, 16 MB at most. u undoes it.
+                        (vim's O, line above, is not available.)
     gq                  re-wrap the paragraph at the wrap width
     yy Y dd p P x D J u yank, delete, put, delete char, delete to end,
                         join, undo
@@ -503,10 +642,19 @@ Editor (vim-like):
   Date, In-Reply-To, References) are kept hidden, unchanged, and sent; :e
   shows the whole text in the external editor. Header lines the writer adds
   stay visible. A header error in a hidden header is only reported.
+  An empty From: (local account without address) is shown, and the cursor
+  starts on it (shown_header() in editor.c, start = 0 in compose_start).
 - Wrap: wrap width 72 by default (C -> Wrap width, or wrap_width).
   On for a new message, off for reply and forward. The last word that does
   not fit moves to the next line and the rest of the paragraph re-wraps.
   Quoted lines (>) and too long words are not broken.
+- The menu item names the action: "unWrap" (hotkey W) while wrapping is
+  on, "Wrap" while it is off; never inverted. unWrap (bp.nowrap): one row per line, all lines scrolled by
+  bp.hoff; the cursor is kept 8 columns (hmargin) from the left and right
+  edge. A horizontal scroll bar (hbar_t) on the message window's bottom
+  border when the widest line (+1 for the cursor) does not fit: arrows 8
+  columns, track a page, thumb dragged; afterwards the cursor is moved
+  into the visible part.
 
 Attachments:
 - T opens a file browser (Enter opens a folder, ../ goes up, Enter on a
@@ -594,7 +742,22 @@ the login times calculated from them.
 19. Source layout
 -----------------
 
-  src/main.c      state, layout, keys, mouse, login flow, config, accounts
+  src/mcm.h       what the parts below share: state A, accounts, settings,
+                  layout types, the functions one part calls in another
+  src/main.c      startup, command line, login, switching accounts, main
+                  loop (keys, mouse, background work)
+  src/config.c    mcm.conf: read and write, the list of accounts
+  src/folder.c    message list cache, open/refresh folders, filter (L),
+                  background loading after a draw
+  src/screen.c    drawing: windows, column layout and borders, scroll
+                  bars, status line
+  src/msgwin.c    message window: text index, wrap, hex, ':' commands,
+                  save and print
+  src/attach.c    attachments (T)
+  src/keys.c      keys of the main screen, clicks in windows, help window
+  src/certs.c     untrusted certificates, ~/.config/mcm/certs
+  src/account.c   accounts, stored passwords, Config menu, SMTP settings
+  src/send.c      new mail, reply, forward: send or keep as draft
   src/store.c     one interface for IMAP, POP3 and local folders
   src/imap.c      IMAP client
   src/pop3.c      POP3 client

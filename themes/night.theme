@@ -1,0 +1,13 @@
+# Night: dark red on black for a dark room; no blue or white light, so the
+# eyes stay used to the dark. Dim the screen as well.
+BACKGROUND   = black
+TEXT         = #870000
+HIGHLIGHTBG  = #870000
+HIGHLIGHTTXT = black
+MENUBG       = #3a0000
+MENUTXT      = #af0000
+HOTKEY       = #d70000
+TITLEBG      = #5f0000
+TITLETXT     = #af0000
+HEADERBG     = #400000
+HEADERTXT    = #870000

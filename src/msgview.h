@@ -38,6 +38,7 @@ typedef struct {
 	size_t    textlen;
 	size_t    more_off;      /* offset of the first "more" marker, or MV_NO_MORE */
 	int       flowed;        /* a shown text part was format=flowed (unwrapped) */
+	size_t    hdr_end;       /* text before this offset is the header section */
 
 	/* hex window */
 	size_t    hex_off;
@@ -55,6 +56,14 @@ char *mv_body(msgview_t *mv);
 
 /* Fetch the next block of the first incompletely loaded part. */
 int  mv_more(msgview_t *mv, store_t *im);
+
+/* Attachments: the parts shown as "[Attachment: ...]", from the server's
+ * structure (IMAP). Returns how many (*out: malloc'd array of pointers into
+ * the structure), 0 without a structure (then the raw message is parsed,
+ * mime_attachments). */
+int  mv_attachments(msgview_t *mv, mpart_t ***out);
+/* Fetch the whole (still encoded) content of part p into out. */
+int  mv_fetch_part(msgview_t *mv, store_t *im, const mpart_t *p, buf_t *out);
 
 /* Cached raw bytes [off, off+len), or NULL if not in the window. */
 const unsigned char *mv_hex_peek(msgview_t *mv, size_t off, size_t len);

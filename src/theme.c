@@ -8,6 +8,10 @@
  *     TEXT         = white
  *     MENUBG       = lightgray
  *     MENUTXT      = black
+ *     TITLEBG      = #008787   (active window title; default: HIGHLIGHTBG darker)
+ *     TITLETXT     = white     (default: bright white)
+ *     HEADERBG     = #2020a0   (message headers; default: BACKGROUND lighter)
+ *     HEADERTXT    = white     (default: TEXT)
  *
  * Colors: black red green yellow(brown) blue magenta cyan white,
  * with an optional "bright"/"light" prefix, gray/darkgray, darkblue, orange, "default"
@@ -22,6 +26,7 @@
 #include "util.h"
 
 #include <ctype.h>
+#include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -47,6 +52,10 @@ void theme_defaults(theme_t *t)
 	t->menubg = COLOR_WHITE;
 	t->menutxt = COLOR_BLACK;
 	t->hotkey = 208;                  /* orange; yellow on 8-color terminals */
+	t->titlebg = THEME_AUTO;          /* the highlight color, darker */
+	t->titletxt = THEME_AUTO;         /* bright white */
+	t->headerbg = THEME_AUTO;         /* the background, lighter */
+	t->headertxt = THEME_AUTO;        /* the text color */
 }
 
 static int parse_color(const char *in, int *out)
@@ -133,6 +142,10 @@ int theme_load(theme_t *t, const char *path, char *err, size_t errlen)
 		else if (!strcasecmp(k, "MENUBG")) slot = &t->menubg;
 		else if (!strcasecmp(k, "MENUTXT")) slot = &t->menutxt;
 		else if (!strcasecmp(k, "HOTKEY")) slot = &t->hotkey;
+		else if (!strcasecmp(k, "TITLEBG")) slot = &t->titlebg;
+		else if (!strcasecmp(k, "TITLETXT")) slot = &t->titletxt;
+		else if (!strcasecmp(k, "HEADERBG")) slot = &t->headerbg;
+		else if (!strcasecmp(k, "HEADERTXT")) slot = &t->headertxt;
 
 		int c;
 		if (!slot) {
@@ -187,7 +200,13 @@ static const char DEFAULT_TEXT[] =
 	"HIGHLIGHTTXT = black\n"
 	"MENUBG       = lightgray   # menu bar, status line and dialogs\n"
 	"MENUTXT      = black\n"
-	"HOTKEY       = orange      # shortcut letters\n";
+	"HOTKEY       = orange      # shortcut letters\n"
+	"# Title of the active window; without these: HIGHLIGHTBG darker, bright white\n"
+	"#TITLEBG     = #008787\n"
+	"#TITLETXT    = brightwhite\n"
+	"# Headers in the message window; without these: BACKGROUND lighter, TEXT\n"
+	"#HEADERBG    = #2020a0\n"
+	"#HEADERTXT   = white\n";
 
 static int copy_file(const char *from, const char *to)
 {
@@ -236,6 +255,51 @@ char *theme_user_file(const char *name, int *created)
 	}
 	*created = 1;
 	return xstrdup(p);
+}
+
+static int cmp_name(const void *a, const void *b)
+{
+	return strcasecmp(*(char *const *)a, *(char *const *)b);
+}
+
+/* Add the NAME of every NAME.theme in dir to the list (no duplicates). */
+static void add_names(const char *dir, char ***list, int *n, int *cap)
+{
+	DIR *d = opendir(dir);
+	if (!d) return;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		size_t l = strlen(e->d_name);
+		if (l <= 6 || l > 70 || e->d_name[0] == '.' || strcmp(e->d_name + l - 6, ".theme")) continue;
+		char name[72];
+		snprintf(name, sizeof name, "%.*s", (int)(l - 6), e->d_name);
+		int dup = 0;
+		for (int i = 0; i < *n && !dup; i++) dup = !strcmp((*list)[i], name);
+		if (dup) continue;
+		if (*n == *cap) {
+			*cap = *cap ? *cap * 2 : 16;
+			*list = xrealloc(*list, sizeof **list * (size_t)*cap);
+		}
+		(*list)[(*n)++] = xstrdup(name);
+	}
+	closedir(d);
+}
+
+int theme_names(char ***out)
+{
+	char **list = NULL, p[1024];
+	int n = 0, cap = 0;
+	const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
+	if (xdg && *xdg) snprintf(p, sizeof p, "%s/mcm", xdg);
+	else if (home) snprintf(p, sizeof p, "%s/.config/mcm", home);
+	else p[0] = '\0';
+	if (*p) add_names(p, &list, &n, &cap);
+	add_names("themes", &list, &n, &cap);
+	snprintf(p, sizeof p, "%s/themes", DATADIR);
+	add_names(p, &list, &n, &cap);
+	if (n) qsort(list, (size_t)n, sizeof *list, cmp_name);
+	*out = list;
+	return n;
 }
 
 /* Nearest xterm-256 color to 0xRRGGBB. */
@@ -295,6 +359,33 @@ static int fit(int c)
 	return c;
 }
 
+static int to_rgb(int c)
+{
+	static const int basic[8] = {0x000000, 0xcd0000, 0x00cd00, 0xcdcd00,
+	                             0x0000ee, 0xcd00cd, 0x00cdcd, 0xe5e5e5};
+	return c & THEME_RGB ? c & 0xffffff : c < 8 ? basic[c] : xterm_rgb(c);
+}
+
+/* Theme color c (not "default") made darker: 60% of its brightness. */
+static int darker(int c)
+{
+	int rgb = to_rgb(c);
+	int r = (rgb >> 16 & 255) * 6 / 10, g = (rgb >> 8 & 255) * 6 / 10, b = (rgb & 255) * 6 / 10;
+	return THEME_RGB | r << 16 | g << 8 | b;
+}
+
+/* Theme color c (not "default") made lighter, keeping its hue: each
+ * component doubled plus 32 (black -> #202020, darkblue -> #2020a0). */
+static int lighter(int c)
+{
+	int rgb = to_rgb(c), out = 0;
+	for (int s = 16; s >= 0; s -= 8) {
+		int v = (rgb >> s & 255) * 2 + 32;
+		out |= (v > 255 ? 255 : v) << s;
+	}
+	return THEME_RGB | out;
+}
+
 void theme_apply(const theme_t *t)
 {
 	if (!has_colors()) return;
@@ -305,4 +396,19 @@ void theme_apply(const theme_t *t)
 	init_extended_pair(CP_MENU, fit(t->menutxt), fit(t->menubg));
 	init_extended_pair(CP_HOTKEY, fit(t->hotkey), fit(t->menubg));
 	init_extended_pair(CP_HOTKEY_HL, fit(t->hotkey), fit(t->highlightbg));
+	/* the active window's title: its own colors, or bright white on the
+	 * highlight color made darker (the same on an 8-color terminal) */
+	int tbg = t->titlebg != THEME_AUTO ? t->titlebg
+	        : t->highlightbg < 0 ? t->highlightbg : darker(t->highlightbg);
+	int ttx = t->titletxt != THEME_AUTO ? t->titletxt : 15;   /* bright white */
+	init_extended_pair(CP_TITLE, fit(ttx), fit(tbg));
+	/* headers in the message window: their own colors, or the text on a
+	 * lighter background; where that looks the same (8 colors, or the
+	 * terminal's own background) the text is cyan instead */
+	int hbg = t->headerbg != THEME_AUTO ? t->headerbg
+	        : t->background < 0 ? t->background : lighter(t->background);
+	int htx = t->headertxt != THEME_AUTO ? t->headertxt : t->text;
+	if (t->headerbg == THEME_AUTO && t->headertxt == THEME_AUTO && fit(hbg) == fit(t->background))
+		htx = COLOR_CYAN;
+	init_extended_pair(CP_HEADER, fit(htx), fit(hbg));
 }

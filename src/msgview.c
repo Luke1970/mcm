@@ -115,21 +115,34 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 	}
 }
 
+/* A text part this small (encoded octets) is empty: at most a line break
+ * or two, also in base64. */
+#define EMPTY_PART 8
+
+/* The part of a multipart/alternative that is shown: the plain text, but
+ * not an empty one (some newsletters send one, with all the text in the
+ * HTML part) when there is HTML; else HTML, a multipart, the first. */
+static int alt_pick(const mpart_t *p)
+{
+	int pick = -1, html = -1, multi = -1;
+	for (int i = 0; i < p->nkids; i++) {
+		const mpart_t *k = &p->kids[i];
+		if (is(k, "text", "plain") && pick < 0) pick = i;
+		else if (is(k, "text", "html") && html < 0) html = i;
+		else if (is(k, "multipart", NULL) && multi < 0) multi = i;
+	}
+	if (pick >= 0 && p->kids[pick].size <= EMPTY_PART && html >= 0) pick = html;
+	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
+	return pick;
+}
+
 /* Walk the structure. With out == NULL, only collect the displayed leaves. */
 static void walk(msgview_t *mv, mpart_t *p, buf_t *out)
 {
 	if (is(p, "multipart", NULL)) {
 		if (!p->nkids) return;
 		if (is(p, "multipart", "alternative")) {
-			int pick = -1, html = -1, multi = -1;
-			for (int i = 0; i < p->nkids; i++) {
-				mpart_t *k = &p->kids[i];
-				if (is(k, "text", "plain") && pick < 0) pick = i;
-				else if (is(k, "text", "html") && html < 0) html = i;
-				else if (is(k, "multipart", NULL) && multi < 0) multi = i;
-			}
-			if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
-			walk(mv, &p->kids[pick], out);
+			walk(mv, &p->kids[alt_pick(p)], out);
 		} else {
 			for (int i = 0; i < p->nkids; i++) {
 				if (out && i) ensure_para(out);
@@ -220,6 +233,40 @@ int mv_open(msgview_t *mv, store_t *im, uint32_t uid, uint32_t size)
 	return 0;
 }
 
+/* The parts walk() lists as attachments. */
+static void walk_atts(msgview_t *mv, mpart_t *p, mpart_t ***out, int *n)
+{
+	if (is(p, "multipart", NULL)) {
+		if (!p->nkids) return;
+		if (is(p, "multipart", "alternative")) {
+			walk_atts(mv, &p->kids[alt_pick(p)], out, n);
+		} else {
+			for (int i = 0; i < p->nkids; i++) walk_atts(mv, &p->kids[i], out, n);
+		}
+	} else if (!inline_part(p) && p != &mv->fallback) {
+		*out = xrealloc(*out, sizeof **out * (size_t)(*n + 1));
+		(*out)[(*n)++] = p;
+	}
+}
+
+int mv_attachments(msgview_t *mv, mpart_t ***out)
+{
+	int n = 0;
+	*out = NULL;
+	if (mv->open && mv->root) walk_atts(mv, mv->root, out, &n);
+	return n;
+}
+
+int mv_fetch_part(msgview_t *mv, store_t *im, const mpart_t *p, buf_t *out)
+{
+	enum { BLOCK = 1024 * 1024 };
+	for (;;) {
+		imap_partial_t req = {.section = p->section, .off = out->len, .len = BLOCK, .out = out};
+		if (store_fetch_partial(im, mv->uid, &req, 1) != 0) return -1;
+		if (req.got < BLOCK) return 0;
+	}
+}
+
 int mv_more(msgview_t *mv, store_t *im)
 {
 	for (int i = 0; i < mv->nleaves; i++) {
@@ -245,6 +292,8 @@ void mv_render(msgview_t *mv, int all_headers)
 		buf_adds(&out, s);
 		free(s);
 	}
+	mv->hdr_end = out.len;               /* not the blank line(s) after it */
+	while (mv->hdr_end && out.d[mv->hdr_end - 1] == '\n') mv->hdr_end--;
 	walk(mv, mv->root ? mv->root : &mv->fallback, &out);
 
 	/* trim trailing blank lines, but never cut into the "more" marker */

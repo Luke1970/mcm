@@ -1,2 +1,2 @@
 # Key line at the bottom of the editor in command mode (one line). Edit it, then run make.
-E/I edit  S send  K keep  H header  W wrap  T attach  ^←/^→ word  :e $EDITOR  yy dd p  gq  u undo  Q/Esc close
+E/I edit  S send  K keep  H header  W wrap  T attach  O open  ^←/^→ word  :e $EDITOR  yy dd p  gq  u undo  Q/Esc close

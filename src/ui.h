@@ -41,7 +41,9 @@ extern int ui_key_sspace;
  * (on = 1 at the press, 0 at the release). */
 void ui_mouse_drag(int on);
 
-enum { CP_NORMAL = 1, CP_HIGHLIGHT, CP_MENU, CP_HOTKEY, CP_HOTKEY_HL };
+enum { CP_NORMAL = 1, CP_HIGHLIGHT, CP_MENU, CP_HOTKEY, CP_HOTKEY_HL,
+       CP_TITLE, CP_HEADER };   /* CP_TITLE: title of the active window;
+                                   CP_HEADER: headers in the message window */
 
 typedef void (*ui_bg_fn)(void);   /* redraws the screen behind a dialog */
 
@@ -91,6 +93,10 @@ int  ui_choice_dialog(const char *title, const char *const *lines, int n,
 /* Pick one of n lines: arrows, Enter or a click picks, Esc gives -1. */
 int  ui_list_dialog(const char *title, const char *const *items, int n, int def, const char *hint,
                     ui_bg_fn bg);
+
+/* Run $VISUAL/$EDITOR (vi; Windows: Notepad) on a file, curses put aside;
+ * readonly: vi/vim/nvim/view get -R. Returns its exit status, -1 failed. */
+int  ui_run_editor(const char *path, int readonly);
 
 /* Pick a file: folders open, a file is chosen (its full path, malloc'd);
  * NULL for Esc. dir is where to start ("" = the current directory) and is

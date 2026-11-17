@@ -21,6 +21,23 @@ char *mime_header_raw(const char *raw, size_t len, const char *name);
  * all_headers: show the complete raw header block instead of a summary. */
 char *mime_render(const char *raw, size_t len, int all_headers);
 
+/* Only the body of a raw message as plain UTF-8 text (no header summary). */
+char *mime_render_body(const char *raw, size_t len);
+
+/* The attachments of a raw message: the parts that are listed as
+ * "[Attachment: ...]" when it is shown, with their data decoded. */
+typedef struct {
+	char  *name;       /* decoded file name, or "(unnamed)" */
+	char  *type;       /* "image/png" */
+	char  *data;       /* decoded content */
+	size_t len;
+} mime_att;
+int  mime_attachments(const char *raw, size_t len, mime_att **out);
+void mime_att_free(mime_att *a, int n);
+
+/* Undo a Content-Transfer-Encoding (base64, quoted-printable, else as is). */
+char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outlen);
+
 /* Summary (From, To, Cc, Date, Subject) of a header block, ending in a blank line. */
 char *mime_summary(const char *hdr, size_t len);
 

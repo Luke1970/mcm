@@ -1,0 +1,12 @@
+# Amber monochrome monitor
+BACKGROUND   = black
+TEXT         = #ffb000
+HIGHLIGHTBG  = #ffb000
+HIGHLIGHTTXT = black
+MENUBG       = #4d3500
+MENUTXT      = #ffb000
+HOTKEY       = #ffe080
+TITLEBG      = #8a6000
+TITLETXT     = #ffffff
+HEADERBG     = #2a1d00
+HEADERTXT    = #ffb000

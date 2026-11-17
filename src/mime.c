@@ -406,6 +406,31 @@ static char *part_type(span_t s)
 
 static void render_part(buf_t *out, const char *p, size_t len, int depth);
 
+/* The part of a multipart/alternative that is shown: the plain text, unless
+ * it is empty (only a line break or two, also in base64) and there is HTML;
+ * else the HTML, else a nested multipart, else the first. */
+static int alt_pick(span_t *parts, int n)
+{
+	int pick = -1, html = -1, multi = -1;
+	for (int i = 0; i < n; i++) {
+		char *t = part_type(parts[i]);
+		if (!strcmp(t, "text/plain") && pick < 0) pick = i;
+		else if (!strcmp(t, "text/html") && html < 0) html = i;
+		else if (!strncmp(t, "multipart/", 10) && multi < 0) multi = i;
+		free(t);
+	}
+	if (pick >= 0 && html >= 0) {
+		const char *ph, *pb;
+		size_t phl, pbl, blank = 0;
+		split_entity(parts[pick].p, parts[pick].len, &ph, &phl, &pb, &pbl);
+		for (size_t k = 0; k < pbl; k++)
+			if (pb[k] == ' ' || pb[k] == '\t' || pb[k] == '\r' || pb[k] == '\n') blank++;
+		if (pbl - blank <= 8) pick = html;
+	}
+	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
+	return pick;
+}
+
 static void render_summary(buf_t *out, const char *p, size_t len)
 {
 	static const char *names[] = {"From", "To", "Cc", "Date", "Subject", NULL};
@@ -452,15 +477,7 @@ static void render_part(buf_t *out, const char *p, size_t len, int depth)
 		if (n == 0) {
 			buf_adds(out, "[empty or malformed multipart]\n");
 		} else if (!strcmp(type, "multipart/alternative")) {
-			int pick = -1, html = -1, multi = -1;
-			for (int i = 0; i < n; i++) {
-				char *t = part_type(parts[i]);
-				if (!strcmp(t, "text/plain") && pick < 0) pick = i;
-				else if (!strcmp(t, "text/html") && html < 0) html = i;
-				else if (!strncmp(t, "multipart/", 10) && multi < 0) multi = i;
-				free(t);
-			}
-			if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
+			int pick = alt_pick(parts, n);
 			render_part(out, parts[pick].p, parts[pick].len, depth + 1);
 		} else {
 			for (int i = 0; i < n; i++) {
@@ -553,6 +570,94 @@ char *mime_render(const char *raw, size_t len, int all_headers)
 	char *s = sanitize(&out);
 	buf_free(&out);
 	return s;
+}
+
+char *mime_render_body(const char *raw, size_t len)
+{
+	buf_t out = {0};
+	render_part(&out, raw, len, 0);
+	char *s = sanitize(&out);
+	buf_free(&out);
+	return s;
+}
+
+char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outlen)
+{
+	buf_t b = {0};
+	if (cte && !strcasecmp(cte, "base64")) {
+		b64_decode(in, len, &b);
+	} else if (cte && !strcasecmp(cte, "quoted-printable")) {
+		qp_decode(in, len, &b, 0);
+		if (b.len && (!len || in[len - 1] != '\n')) b.len--;   /* the newline qp_decode adds */
+	} else {
+		buf_add(&b, in, len);
+	}
+	*outlen = b.len;
+	buf_cstr(&b);
+	return buf_steal(&b);
+}
+
+/* Collect the attachments of entity p (the same choices as render_part). */
+static void collect_atts(const char *p, size_t len, int depth, mime_att **out, int *n)
+{
+	const char *h, *b;
+	size_t hl, bl;
+	split_entity(p, len, &h, &hl, &b, &bl);
+	char *ct = hdr_get(h, hl, "Content-Type");
+	char *type = mime_type(ct);
+	char *cte = hdr_get(h, hl, "Content-Transfer-Encoding");
+	char *disp = hdr_get(h, hl, "Content-Disposition");
+	int attachment = disp && !strncasecmp(disp, "attachment", 10);
+
+	if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
+		char *boundary = param_get(ct, "boundary");
+		span_t *parts = NULL;
+		int k = boundary ? split_multipart(b, bl, boundary, &parts) : 0;
+		if (k && !strcmp(type, "multipart/alternative")) {
+			int pick = alt_pick(parts, k);
+			collect_atts(parts[pick].p, parts[pick].len, depth + 1, out, n);
+		} else {
+			for (int i = 0; i < k; i++) collect_atts(parts[i].p, parts[i].len, depth + 1, out, n);
+		}
+		free(parts);
+		free(boundary);
+	} else if (!strcmp(type, "message/rfc822") && !attachment && depth < MAX_DEPTH) {
+		collect_atts(b, bl, depth + 1, out, n);
+	} else if (!attachment && (!strcmp(type, "text/plain") || !strcmp(type, "text/html") ||
+	                           mime_is_markdown(type) || !strncmp(type, "multipart/", 10))) {
+		/* shown as text */
+	} else {
+		char *fn = param_get(disp, "filename");
+		if (!fn) fn = param_get(ct, "name");
+		*out = xrealloc(*out, sizeof **out * (size_t)(*n + 1));
+		mime_att *a = &(*out)[(*n)++];
+		a->name = fn ? mime_decode_words(fn) : xstrdup("(unnamed)");
+		a->type = xstrdup(type);
+		a->data = mime_decode_cte(b, bl, cte, &a->len);
+		free(fn);
+	}
+	free(ct);
+	free(type);
+	free(cte);
+	free(disp);
+}
+
+int mime_attachments(const char *raw, size_t len, mime_att **out)
+{
+	int n = 0;
+	*out = NULL;
+	collect_atts(raw, len, 0, out, &n);
+	return n;
+}
+
+void mime_att_free(mime_att *a, int n)
+{
+	for (int i = 0; i < n; i++) {
+		free(a[i].name);
+		free(a[i].type);
+		free(a[i].data);
+	}
+	free(a);
 }
 
 char *mime_summary(const char *hdr, size_t len)

@@ -9,14 +9,14 @@ Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
 `emsg.conf` to `mcm.conf`; accounts and stored passwords keep working.
 
 ```
- Quit   Mail   Reply   Forward   heX   Header   Account   Config   F1=Help  Thu 12 Nov 2026
+ Quit  Mail  Reply  Forward  Account  Config  F1=Help                        Thu 12 Nov 2026
 ┌─ INBOX  3 msgs, 1 new ──────────────────────┐┌─ Message ──────────────────────────────┐
 │A Weekly deals        Newsletter 261112.23:01││From     Newsletter <news@shop.example> ▲
 │N Grüße aus Köln      Jürgen M…  261111.09:15││Subject  Weekly deals                   █
 │  plain old mail      alice@ex…  261111.00:00││                                        ░
 │                                             <>Hello,                                  ▼
-└──────────── fiLter  TAB=Folders  PgUp/PgDn ─┘└───────── Spc=PgDn Shift+Spc/Bksp=PgUp ─┘
- test@localhost  F1 Help  Tab Folders/Emails  ←→ Column  Enter Open  L Filter  F5 Refresh
+└─L────────── TAB=Folder|Accounts  PgUp/PgDn ─┘└─H─W─X─S─P─T─────────── Spc=PgDn B=PgUp ─┘
+ test@localhost  Enter Open  F5 Refresh  Q/^Q Quit
 ```
 
 Features:
@@ -305,8 +305,10 @@ section:
 ```
 theme = default
 wrap_width = 72
+message_wrap = 1
 folders_width = 25
 list_width = 45
+accounts_width = 15
 last_account = Work
 master_check = enc1$16$8$1$...
 
@@ -341,7 +343,7 @@ path = ~/Mail
 The full name goes into From: as `Jörg Tester <joerg@example.org>`; it is quoted
 or RFC 2047 encoded when needed. **A** (Account) lists the accounts: Enter on the
 current one (marked `*`) changes its name, full name and stored password; Enter
-on another one, or on *New account*, restarts mcm with that account. A config
+on another one, or on *New account*, switches to that account. A config
 file from emsg 0.3 (the old name, without sections) is read as one account.
 
 ### Stored passwords
@@ -349,8 +351,9 @@ file from emsg 0.3 (the old name, without sections) is read as one account.
 After the first successful login mcm asks whether to store the password:
 **Store encrypted**, **Not now** (ask next time) or **Don't ask again**. A stored
 password is encrypted with a *master password* that you choose once (typed
-twice, at least 8 characters). After that, mcm asks for the master password at
-start instead of the account password; Esc skips it and shows the normal login.
+twice, at least 8 characters). After that, mcm asks for the master password
+once, at start, instead of the account password; Esc skips it and shows the
+normal login. Switching to another account does not ask it again.
 The master password and the decrypted passwords are only kept in memory and
 are overwritten when mcm exits. **A** can store or forget the password later;
 **C** (Config) → *Delete all stored passwords* removes them from every account,
@@ -374,7 +377,8 @@ How a password is encrypted (`src/vault.c`, OpenSSL):
 4. **Stored as** `enc1$16$8$1$SALT$NONCE$CIPHERTEXT+TAG` (base64): version,
    scrypt parameters (log2 N, r, p), salt, nonce, and the encrypted password
    with its 16-byte GCM tag.
-5. **Checking the master password:** `master_check` holds the word `mcm`
+5. **Checking the master password:** `master_check` holds the word `emsg`
+   (the program's old name, kept so existing master passwords still work)
    encrypted the same way, so a wrong master password is reported at once.
 
 The protection is as strong as the master password: someone with a copy of
@@ -383,60 +387,121 @@ Use a long one. The master password itself is never stored.
 
 ### Screen and keys
 
-There are three windows: **Folders**, the **email list** and the **message**.
+There are four windows: **Accounts**, **Folders**, the **email list** and the
+**message**. The message is always on the right.
 
-- **Up to 150 columns** two are shown: on the left the email list *or* the
-  folders, on the right always the message. **Tab** switches the left window
-  (its bottom border says `TAB=Folders`, left of `PgUp/PgDn`, or
-  `TAB=Emails`). Opening a folder (Enter) brings the email list back. The
-  folder window's bottom border shows `Enter=Select` (and `TAB=Emails` when
-  the window is wide enough).
-- **More than 150 columns** all three are shown side by side:
-  Folders | List | Message. Tab is not needed then and does nothing.
+- **Up to 150 columns** two are shown. **Tab** changes the left window in
+  turn: email list → Folders → Accounts → email list (Shift-Tab goes the
+  other way). Each window's bottom border shows where Tab | Shift-Tab go:
+  `TAB=Folder|Accounts` in the email list, `TAB=Account|Email` in Folders and
+  `TAB=Email|Folder` in Accounts (after `Enter=Select` when the window is wide
+  enough). Opening a folder (Enter) brings the email list back.
+- **151 to 170 columns** three are shown side by side: Folders (or
+  Accounts) | List | Message. Tab switches the first window between Folders
+  and Accounts.
+- **More than 170 columns** all four are shown: Accounts | Folders | List |
+  Message. Tab is not needed then and does nothing, and no window shows a
+  `TAB=` hint; ← and → walk through all four.
+- A window left of the message is never narrower than 25 columns.
+
+The **Accounts** window lists every account (the current one marked `>` and
+in bold) with where its mail is, and *New account ...* at the end. Enter or
+a double click on the current account shows its folders; on another account
+mcm switches to that one (as **A** does), on *New account* it sets up a new
+one; if that login is cancelled or fails, the previous account is opened
+again. → or Esc goes to the email list.
 
 ← and → move between the windows; on the main screen Esc goes back to the email
 list. On startup INBOX is opened and the newest message is shown.
 
 The widths can be changed: **Ctrl-←** / **Ctrl-→** move the border on the left of
-the message (with three columns: next to the folders when they have focus), or
+the message (with three or four columns: the border right of Folders or
+Accounts when that window has focus), or
 drag a border with the mouse (the one between list and message is marked `<>`):
 it follows the mouse while the button is held. (Only during such a drag does
 mcm ask the terminal for mouse movement, xterm mode 1002; otherwise it
 receives clicks only.) The widths are kept in `mcm.conf` as percentages, so
 they also fit after the terminal is resized: `folders_width` is the folder
 window's share of the screen, `list_width` the email list's share of the
-screen (with three columns: of what the folders leave).
+screen (with three or four columns: of what the windows left of it leave),
+and `accounts_width` the Accounts window's share in the four-column layout.
 
 | Key | Action |
 |---|---|
-| Tab | up to 150 columns: switch the left window between email list and folders |
-| ← → | move between the windows |
+| Tab, Shift-Tab | up to 150 columns: the left window goes email list → Folders → Accounts → email list (Shift-Tab: back); 151–170 columns: the first window switches between Folders and Accounts; wider: nothing (all four windows are shown) |
+| ← → | move between the windows: ← goes message → email list → Folders → Accounts, → back; in the message with W off they move the text sideways (8 columns), and ← at the start goes to the window on the left |
 | ↑ ↓ Home End | move / scroll |
 | PgUp PgDn | page through the message list (only there) |
-| Enter | open folder / read message |
+| Enter | open account / folder / read message |
 | Space | page down in the message, from every window |
 | Shift-Space, Ctrl-Space, Alt-Space, Backspace | page up in the message, from every window |
-| H | toggle full headers (Header is inverted in the menu while on) |
-| X | toggle hex dump of the raw message (heX is inverted in the menu while on) |
+| B | page up in the message (in the message window) |
+| : | a vim-like command in the message window (see below) |
+| H | toggle full headers |
+| W | wrap long lines in the message (at the window, at most 76 columns) or not (scroll sideways); also turns H and X off |
+| X | toggle hex dump of the raw message |
+| S | save the message as a text file (see below) |
+| P | print the message (`lp`; on Windows Notepad prints it) |
+| T | attachments: list them, open or save one (see below) |
 | L | filter the email list (see *Filter*) |
 | F5 | refresh folder (also polled every 60 s) |
 | F1 / ? | help |
 | Q | quit |
 | Ctrl-Q, Ctrl-C | quit at once, from anywhere: the main screen, any dialog or the editor (see below) |
 | M R F | Mail / Reply / Forward: opens the editor |
-| C | Config: SMTP settings, account settings, switch account, wrap width, delete all stored passwords |
+| C | Config: SMTP settings, account settings, switch account, wrap width, theme, delete all stored passwords |
 | Ctrl-← / Ctrl-→ | narrower / wider left column |
 | A | accounts: switch, add, name, full name, stored password |
-| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; drag the column border to resize; use the scroll bar; the wheel scrolls the message and the lists |
+| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; click L on the list's or H, W, X, S, P, T on the message's bottom border; drag the column border to resize; use a scroll bar (every window that needs one, the help window too, and a horizontal one under an unwrapped message); the wheel scrolls the message, the lists and the help |
 
 The bottom border of the list and the message window shows their paging keys.
+The list's bottom border starts with **L** (the filter, inverted while it is
+on). The message window's bottom border starts with **H W X S P T**: all headers,
+wrapped lines, hex dump, save, print, attachments; H, W and X are inverted while their mode
+is on, and a click on a letter works like the key. Pressing W also turns H and
+X off, back to the message text. With W on (the default, kept in `mcm.conf` as
+`message_wrap`) long lines are wrapped at the window's width, at most 76
+columns. With W off lines are shown whole: ← and → move the text sideways and
+a horizontal scroll bar on the bottom border shows where you are (it replaces
+the paging hint while it is there).
 
-A long message has a scroll bar in the right border of the message window: click
-▲ or ▼ to scroll a line, click the track above or below the thumb (█) to scroll a
-page, or drag the thumb. The mouse wheel over the message window scrolls it
-three lines at a time, and over the email or folder list it scrolls that list:
-the selected email stays open, and the next key (or click) brings the list
-back to the selection. A click on an email or folder selects it (and gives that window
+**S** saves the open message as a text file, as it is shown (with all headers
+when H is on), in `~/Downloads`, or in your home folder when there is no
+`Downloads` (on Windows `%USERPROFILE%\Downloads`). The name is
+`mcm--SENDER--YYYY-MM-DD--SUBJECT.txt`: the sender's address, the date from
+the message's `Date` header and its subject, e.g.
+`mcm--jan@example.com--2026-11-14--Meeting notes.txt`. Characters that are
+not allowed in file names (`/ \ : * ? " < > |`) become `_`; an existing file
+is never overwritten (`-2`, `-3` is added). The file is readable by you only
+(mode 0600). The rest of a long message is fetched first. **P** sends the
+same text to the printer with `lp` (CUPS); on Windows Notepad prints it on the
+default printer.
+
+**T** lists the open message's attachments (name, type, size). Choose one with
+the arrows and Enter, then **Open** or **Save**:
+
+- **Open** shows it in the program your desktop uses for that kind of file
+  (`xdg-open`; on Windows the program Windows uses). mcm writes it to a
+  private folder first (`$XDG_RUNTIME_DIR/mcm-attachments`, else
+  `~/.cache/mcm-attachments`; on Windows `%TEMP%\mcm-attachments`), which is
+  emptied when mcm ends and starts. Program files (`.exe`, `.bat`, `.js`,
+  `.sh`, `.desktop` and the like) are never opened, only saved.
+- **Save** puts it in `~/Downloads` (or your home folder) under its own name,
+  without overwriting (`-2`, `-3` is added) and readable by you only.
+  Folder parts in the name are removed and a leading dot becomes `_`.
+
+On IMAP only the chosen attachment is downloaded.
+
+Every window whose content does not fit (a long message, a folder with more
+emails than rows, many folders or accounts) gets a scroll bar in its right
+border: click ▲ or ▼ to scroll a line, click the track above or below the
+thumb (█) to scroll a page, or drag the thumb; in a folder of 250,000 emails
+that jumps straight to the right place. The mouse wheel over the message
+window scrolls it three lines at a time, and over the email list, Folders or
+Accounts it scrolls that list. A list scrolled with the wheel or the scroll
+bar keeps its selection (the open email stays open); the next key (or click)
+brings the list back to the selection. Where the email list has a scroll
+bar, the `<` of the `<>` border mark gives way to it. A click on an email or folder selects it (and gives that window
 the focus); a double click opens it, like Enter.
 Many terminals (GNOME Terminal, Konsole, tmux, the Linux text console) send the
 same code for Shift-Space as for Space, so there Shift-Space pages *down*; use
@@ -458,9 +523,29 @@ mode 0600, its path is printed).
 - While `:e` runs your own editor, Ctrl-C belongs to that editor.
 - On Windows, Ctrl-C is read as a key like Ctrl-Q (see [Windows](#windows)).
 
+### Commands in the message window
+
+With the focus on the message window, **:** opens a vim-like command line on
+the bottom line (Enter runs it, Esc cancels). While the message window has
+the focus, the bottom line shows a reminder:
+`:e Vim  :/text Search  :N Line  :w Save  :q Quit`.
+
+| Command | Does |
+|---|---|
+| `:e` (`:view`, `:vi`, `:vim`) | open the message, as shown, in `$VISUAL`/`$EDITOR` (default `vi`, Windows Notepad); vi, vim, nvim and view get `-R` (read only). The temporary file is deleted afterwards |
+| `:q` (`:q!`, `:qa`, `:x`, `:wq`) | quit mcm |
+| `:w` | save the message as **S** does |
+| `:w FILE` | save the message, as shown, to FILE (`~` allowed); `:w! FILE` replaces an existing file |
+| `:N`, `:+N`, `:-N`, `:$` | go to line N of the text (headers included, as in `:e`), N lines on or back, the end |
+| `:/text`, `:?text` | search on / back, any case, around the end; `:/` repeats. Every match is shown in the highlight color (also in other messages) until `:noh` |
+| `:noh` | stop highlighting the search matches |
+| `:set wrap`, `:set nowrap`, `:set wrap!` | as **W** |
+| `:hardcopy` | print, as **P** |
+| `:h` | help |
+
 ### Filter
 
-**L** (fi**L**ter, shown in the email list's bottom border) opens a filter bar in
+**L** (also at the left of the email list's bottom border) opens a filter bar in
 that border: `Filter: text  Enter=Apply  Esc=Leave`. Type a word and press
 **Enter**: the list shows only the messages whose **subject or sender**
 contains it, ignoring upper and lower case (also for letters such as ö and Ö).
@@ -496,8 +581,14 @@ Hello Bob,
 
 The editor has two windows: the **header** on top and the **message** below.
 
-1. The editor opens in the **header window**. Fill in the headers; Enter adds a
-   header line.
+1. The editor opens in the **header window**, a form: one row per header,
+   the names (`To:`, `Cc:`, `Bcc:`, `Subject:`) in a column of their own.
+   The names cannot be edited, only the fields after them; Backspace stops at
+   the start of a field. A field longer than the window scrolls sideways with
+   the cursor (`…` marks a field that goes on). **Enter on Subject** goes to
+   the message window; Enter on another field adds an empty line below for a
+   header of your own: type its name and `:` (e.g. `Reply-To:`), and from then
+   on only its field can be edited.
 2. **Tab** closes the header window: the headers stay visible above, and you
    type the message text in the window below. **↓** on the last header
    line also goes to the message, and **↑** on the first line of the message
@@ -506,24 +597,25 @@ The editor has two windows: the **header** on top and the **message** below.
    edit.
 3. While you type the headers or the message, the menu bar shows
    **Esc=leaveEdit** **EdIt** **S**end **K**eep **H**eader **W**rap a**T**tach
-   for the mouse (typed letters are text): a click on a command leaves editing
+   **O**pen for the mouse (typed letters are text): a click on a command leaves editing
    and runs it; Esc=leaveEdit goes to command mode. The status line shows the
    keys of the window and the cursor position (Ln, Col).
 4. **Esc** leaves editing (in the header or the message window) for
    **command mode**, with the menu **EdIt** **S**end **K**eep **H**eader
-   **W**rap a**T**tach and the keys below. **Esc** in command mode closes the
+   **W**rap a**T**tach **O**pen and the keys below. **Esc** in command mode closes the
    editor and returns to the email list and the message (asking first if the
    text was changed).
 
 | Key | Action |
 |---|---|
-| E / I (also i a A o O) | edit the message again (at cursor, after it, line end, new line below / above) |
+| E / I (also i a A o) | edit the message again (at cursor, after it, line end, new line below) |
 | S | send (asks to confirm the recipients first) |
 | K | keep: save in the Drafts folder and close |
 | H | back to the header window (Esc returns to the message) |
 | yy / Y, dd, p P | yank line, delete line, put below / above |
 | W | Wrap on / off (wrap while typing at the wrap width) |
 | T | attach a file (see *Attachments*) |
+| O | Open a text file (see below) |
 | gq | re-wrap the paragraph at the wrap width |
 | x D J u | delete character, delete to line end, join lines, undo |
 | arrows, Ctrl-← Ctrl-→ (word), b, PgUp PgDn, 0 $, gg G, Ctrl-F/B | move (the menu letters E I S K H W work in either case, so vim's h j k l and w are not used) |
@@ -535,12 +627,25 @@ The editor has two windows: the **header** on top and the **message** below.
 Shortcut letters in menus and dialog buttons are shown in the `HOTKEY` color
 (orange by default).
 
+**Open** (menu, or **O** in command mode) loads a text file into the editor.
+If the file is an email message (a header block with e.g. From, To, Subject or
+Date, an empty line, then the text; `.eml` files and single messages saved
+from a mail program) and **To, Cc, Bcc and Subject are all empty**, its To,
+Cc, Bcc and Subject fill the header window and its text (decoded, as mcm
+shows it) goes into the message window. Otherwise, for example when To
+already has an address, the **whole file** goes into the message window.
+The text replaces an empty message, or goes in below the cursor line; **u**
+undoes it. A file that is not UTF-8 is read as Windows-1252 (Latin-1).
+
 The header window shows only **To**, **Cc**, **Bcc** and **Subject** (and the
 `Attach:` lines of attached files). The other headers are filled in by mcm
 and sent along without being shown: **From** (your full name and address),
 **Date**, and for a reply **In-Reply-To** and **References**. To see or change
 them, open the message in your own editor with `:e`. A header line you add
-yourself (Enter in the header window, e.g. `Reply-To: ...`) stays visible.
+yourself (Enter on a field other than Subject, e.g. `Reply-To: ...`) stays visible.
+When the account has no address of its own (a local mailbox whose *address*
+is empty in **C** → *Account*), the **From** line is shown empty with the
+cursor on it: type your address there, or set it in the account once.
 
 ### Wrapping and format=flowed
 
@@ -549,10 +654,15 @@ width, **72 columns** by default: the last word that does not fit moves to the
 next line, and inside a paragraph the following lines are re-wrapped as you
 insert text. Wrap is **on for a new message** (M) and **off for a reply or
 forward** (R, F), whose quoted text keeps its own layout; W switches it on or
-off at any time, and the menu shows *Wrap* inverted while it is on. **gq**
-(command mode) re-wraps the paragraph under the cursor at the wrap width, also
-when Wrap is off. Quoted lines (`>`) and words longer than the width are not
-broken; the screen still wraps anything wider than the window.
+off at any time. The menu item names what W will do: ***unWrap*** while
+wrapping is on, *Wrap* while it is off (unWrap). **gq** (command mode) re-wraps the paragraph under the cursor
+at the wrap width, also with unWrap. Quoted lines (`>`) and words longer than
+the width are not broken. With Wrap on, the screen still wraps anything wider
+than the window. With **unWrap** every line stays on one row: the text moves
+sideways when the cursor comes within 8 columns of the window's left or right
+edge, and a horizontal scroll bar on the message window's bottom border (◄ ►
+move 8 columns, the track a page, the thumb can be dragged) shows where you
+are.
 
 The wrap width is a setting: **C** (Config) → *Wrap width for new mail*, or
 `wrap_width = 72` in `mcm.conf` (20–998).
@@ -615,7 +725,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.95 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.974 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -661,7 +771,9 @@ IMAP.
 ## HTML and Markdown messages
 
 Messages are shown as text. When a message has a plain-text version, that one
-is shown; otherwise its HTML is converted:
+is shown; otherwise its HTML is converted. A plain-text version that is empty
+(some newsletters send one, with all the text in the HTML) counts as missing,
+so the HTML is shown:
 
 - headings: the first level underlined with `=`, the second with `-`;
 - paragraphs, line breaks, bullet lists and numbered lists (indented when
@@ -710,6 +822,10 @@ of `./themes/NAME.theme` or `$(PREFIX)/share/mcm/themes/NAME.theme`, or the
 built-in colors for `default`. Edit it and start mcm again to see the change.
 `-t` also accepts a path to a theme file.
 
+**C** (Config) → *Theme* lists every theme found (in `~/.config/mcm`,
+`./themes` and the installed themes); the one you pick is used at once and
+saved as `theme =` in `mcm.conf`.
+
 ```
 BACKGROUND   = darkblue
 TEXT         = white
@@ -718,7 +834,23 @@ HIGHLIGHTTXT = black
 MENUBG       = lightgray
 MENUTXT      = black
 HOTKEY       = orange
+#TITLEBG     = #008787
+#TITLETXT    = brightwhite
+#HEADERBG    = #2020a0
+#HEADERTXT   = white
 ```
+
+`TITLEBG` and `TITLETXT` color the title of the active window. Without them
+the title is bright white on a darker selection bar color (60% of
+`HIGHLIGHTBG`, so cyan becomes dark cyan; on an 8-color terminal it stays
+cyan).
+
+`HEADERBG` and `HEADERTXT` color the header lines (From, To, Date, Subject,
+or all headers with H) at the top of the message window. Without them the
+headers use `TEXT` on a lighter background (each color component doubled
+plus 32, so darkblue becomes #2020a0 and black #202020); where that would
+look the same as the rest (an 8-color terminal, or `BACKGROUND = default`)
+the header text is cyan instead.
 
 Colors: `black red green yellow blue magenta cyan white`, optional `bright`/`light`
 prefix, `gray`, `darkgray`, `darkblue` (#000040), `navy`, `orange`, `default` (terminal color),
@@ -727,7 +859,19 @@ a number 0–255 or `#RRGGBB`. An `#RRGGBB` color (and `darkblue`) is shown exac
 color 17, #00005f). With `TERM=xterm-256color` and `COLORTERM=truecolor` (or `24bit`), as
 GNOME Terminal, Konsole and most modern terminals set, mcm uses the `xterm-direct`
 terminal description to send 24-bit colors; set `MCM_NO_DIRECT=1` to prevent that.
-Included: `default`, `mc`, `dark`, `mono`.
+Included:
+
+| Theme | Colors |
+|---|---|
+| `default` | PC Tools style: white on dark blue, cyan selection bar |
+| `mc` | Midnight Commander style: light gray on blue |
+| `dark` | light gray on black, blue selection bar |
+| `mono` | the terminal's own colors |
+| `eink` | black on white with grays only, for e-ink screens |
+| `night` | dark red on black, for a dark room (no blue or white light) |
+| `amber` | amber monochrome monitor |
+| `green` | green phosphor monochrome monitor |
+| `paper` | dark gray on warm off-white, blue selection bar |
 
 ## Windows
 
@@ -884,7 +1028,17 @@ Notes:
 
 | File | Purpose |
 |---|---|
-| `src/main.c` | application state, layout, key handling, login flow, config |
+| `src/mcm.h` | what the parts of the program share: its state, the accounts, settings, layout types and functions |
+| `src/main.c` | startup, command line, login, switching accounts, the main loop |
+| `src/config.c` | `mcm.conf`: reading and writing it, the list of accounts |
+| `src/folder.c` | the message list (cached header blocks), opening and refreshing folders, the filter |
+| `src/screen.c` | drawing the windows, column layout and borders, scroll bars, status line |
+| `src/msgwin.c` | the message window: wrapping, hex, `:` commands, save and print |
+| `src/attach.c` | attachments (T): open or save |
+| `src/keys.c` | keys of the main screen, mouse clicks in the windows, the help window |
+| `src/certs.c` | untrusted certificates and the always-accepted ones |
+| `src/account.c` | accounts, stored passwords, the Config menu, SMTP settings |
+| `src/send.c` | writing mail (new, reply, forward), sending it or keeping it as a draft |
 | `src/store.c` | one interface for IMAP, POP3 and local folders |
 | `src/pop3.c` | POP3: TLS or required STLS, USER/PASS, LIST, UIDL, TOP, RETR, new sessions |
 | `src/local.c` | Maildir (Maildir++), mbox and MH folders, the POP3 inbox and its seen/answered state |
