@@ -151,7 +151,7 @@ Message list: N = new, A = answered, * = flagged, D = deleted,
 
 Author: Lucien van Lint 
 email:  mcm@sc00by.nl
-Co-authow: Claude Code
+Co-author: Claude Code
 
 The source is released with a GPL3 license.
 
