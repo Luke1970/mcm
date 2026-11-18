@@ -231,15 +231,12 @@ char *theme_user_file(const char *name, int *created)
 	const char *home = getenv("HOME"), *xdg = getenv("XDG_CONFIG_HOME");
 	char dir[900], p[1024];
 	if (xdg && *xdg) snprintf(dir, sizeof dir, "%s/mcm", xdg);
-	else if (home) {
-		snprintf(dir, sizeof dir, "%s/.config", home);
-		mkdir(dir, 0700);
-		snprintf(dir, sizeof dir, "%s/.config/mcm", home);
-	} else return NULL;
+	else if (home) snprintf(dir, sizeof dir, "%s/.config/mcm", home);
+	else return NULL;
 	snprintf(p, sizeof p, "%s/%s.theme", dir, name);
 	if (readable(p)) return xstrdup(p);
 
-	mkdir(dir, 0700);
+	make_dirs(dir);
 	char src[1024];
 	snprintf(src, sizeof src, "themes/%s.theme", name);
 	if (!readable(src)) snprintf(src, sizeof src, "%s/themes/%s.theme", DATADIR, name);

@@ -174,7 +174,8 @@ Thanks to:
   Colin Percival (scrypt); Joan Daemen, Vincent Rijmen (AES);
   David McGrew, John Viega (GCM).
   D. J. Bernstein (Maildir), Sam Varshavchik (Maildir++), the RAND
-  Corporation and the nmh developers (MH), Unix mail (mbox).
+  Corporation and the nmh developers (MH), Unix mail (mbox),
+  Timo Sirainen and the Dovecot developers (dbox).
   The authors of the standards mcm follows, among them:
     IMAP      Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman
     POP3      John Myers, Marshall Rose (RFC 1939); Chris Newman

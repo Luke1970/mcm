@@ -1,4 +1,4 @@
-/* local.h - mailboxes on this computer (Maildir, mbox) and the POP3 inbox
+/* local.h - mailboxes on this computer (Maildir, mbox, MH, sdbox) and the POP3 inbox
  *
  * The folder root can be:
  *   - an mbox file: one folder, INBOX;
@@ -6,7 +6,10 @@
  *   - an MH folder (numbered files, .mh_sequences): INBOX, subdirectories
  *     are subfolders;
  *   - a directory: every mbox file, Maildir and MH folder below it is a
- *     folder (subdirectories give the hierarchy), plus $MAIL as INBOX.
+ *     folder (subdirectories give the hierarchy), plus $MAIL as INBOX;
+ *   - a Dovecot sdbox root (mailboxes/NAME/dbox-Mails/u.UID): only read,
+ *     flags from Dovecot's index (dbox.h); "seen" set here lasts until mcm
+ *     exits. An mdbox root (with storage/) is refused.
  * Sent, Drafts and Deleted Items (unless there is a Trash or Deleted folder)
  * are listed even before they exist and are created by the first message
  * saved there (of the kind most folders there are).

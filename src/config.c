@@ -2,9 +2,6 @@
  */
 #include "mcm.h"
 
-static void base_dir(char *p, size_t n, const char *xdg_var, const char *home_sub, const char *name);
-static int is_dir(const char *p);
-
 /* ------------------------------------------------------------------ */
 /* Config: ~/.config/mcm/mcm.conf                                    */
 /*                                                                     */
@@ -14,45 +11,6 @@ static int is_dir(const char *p);
 /*     full_name = ...   server = ...   user = ...   ...               */
 /*                                                                     */
 /* A file without [account] sections (emsg 0.3) is read as one account. */
-
-/* Before 0.95 the program was called emsg: its folders (~/.config/emsg,
- * ~/.local/share/emsg, or %APPDATA%\emsg and %LOCALAPPDATA%\emsg) are
- * renamed once, and emsg.conf becomes mcm.conf. Account paths that pointed
- * into the old data folder are rewritten by config_load. */
-static char old_data[1024], new_data[1024];
-static int path_moved;            /* an account path was rewritten: save */
-
-static void base_dir(char *p, size_t n, const char *xdg_var, const char *home_sub, const char *name)
-{
-	const char *xdg = getenv(xdg_var), *home = getenv("HOME");
-	if (xdg && *xdg) snprintf(p, n, "%s/%s", xdg, name);
-	else snprintf(p, n, "%s/%s/%s", home ? home : ".", home_sub, name);
-}
-
-static int is_dir(const char *p)
-{
-	struct stat st;
-	return stat(p, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-void migrate_from_emsg(void)
-{
-	char o[1024], nw[1024];
-	base_dir(o, sizeof o, "XDG_CONFIG_HOME", ".config", "emsg");
-	base_dir(nw, sizeof nw, "XDG_CONFIG_HOME", ".config", "mcm");
-	if (!is_dir(nw) && is_dir(o) && rename(o, nw) == 0) {
-		char a[1100], b[1100];
-		snprintf(a, sizeof a, "%s/emsg.conf", nw);
-		snprintf(b, sizeof b, "%s/mcm.conf", nw);
-		rename(a, b);
-	}
-	base_dir(o, sizeof o, "XDG_DATA_HOME", ".local/share", "emsg");
-	base_dir(nw, sizeof nw, "XDG_DATA_HOME", ".local/share", "mcm");
-	if (!is_dir(nw) && is_dir(o) && rename(o, nw) == 0) {
-		snprintf(old_data, sizeof old_data, "%s", o);
-		snprintf(new_data, sizeof new_data, "%s", nw);
-	}
-}
 
 void config_path(char *p, size_t n, const char *file)
 {
@@ -141,26 +99,14 @@ void config_load(void)
 			if (w >= 5 && w <= 95) col_pct[tolower((unsigned char)*k) == 'l' ? 1 : tolower((unsigned char)*k) == 'a' ? 2 : 0] = w;
 			continue;
 		}
+		if (!strcasecmp(k, "editor")) { snprintf(cfg_editor, sizeof cfg_editor, "%s", v); continue; }
+		if (!strcasecmp(k, "pdf_viewer")) { snprintf(cfg_pdf_viewer, sizeof cfg_pdf_viewer, "%s", v); continue; }
+		if (!strcasecmp(k, "html_viewer")) { snprintf(cfg_html_viewer, sizeof cfg_html_viewer, "%s", v); continue; }
 		if (!strcasecmp(k, "master_check")) { set_secret(&master_check, xstrdup(v)); continue; }
 		if (!a && !(a = account_new(NULL))) break;   /* old file: settings without a section */
 		if (!strcasecmp(k, "type"))
 			a->type = !strcasecmp(v, "pop3") ? STORE_POP3 : !strcasecmp(v, "local") ? STORE_LOCAL : STORE_IMAP;
-		else if (!strcasecmp(k, "path")) {
-			size_t ol = strlen(old_data);
-			if (ol && !strncmp(v, old_data, ol) && (v[ol] == '/' || !v[ol])) {
-				buf_t np = {0};                          /* moved (emsg) */
-				buf_printf(&np, "%s%s", new_data, v + ol);
-				if (np.len < sizeof a->path) {
-					memcpy(a->path, np.d, np.len + 1);
-					path_moved = 1;
-				} else {
-					snprintf(a->path, sizeof a->path, "%s", v);
-				}
-				buf_free(&np);
-			} else {
-				snprintf(a->path, sizeof a->path, "%s", v);
-			}
-		}
+		else if (!strcasecmp(k, "path")) snprintf(a->path, sizeof a->path, "%s", v);
 		else if (!strcasecmp(k, "full_name")) snprintf(a->fullname, sizeof a->fullname, "%s", v);
 		else if (!strcasecmp(k, "server")) snprintf(a->host, sizeof a->host, "%s", v);
 		else if (!strcasecmp(k, "port")) snprintf(a->port, sizeof a->port, "%s", v);
@@ -178,18 +124,13 @@ void config_load(void)
 	}
 	fclose(f);
 	for (int i = 0; i < naccts; i++) account_name(&accts[i]);
-	if (path_moved) config_save();
 }
 
 void config_mkdir(void)
 {
 	char dir[1024];
 	config_path(dir, sizeof dir, NULL);
-	char parent[1024];
-	snprintf(parent, sizeof parent, "%s", dir);
-	char *sl = strrchr(parent, '/');
-	if (sl) { *sl = '\0'; mkdir(parent, 0700); }
-	mkdir(dir, 0700);
+	make_dirs(dir);                    /* (with ~/.config or $XDG_CONFIG_HOME) */
 }
 
 /* Write all accounts (to a new file, then rename: never a half file). */
@@ -221,6 +162,12 @@ void config_save(void)
 	        col_pct[1]);
 	fprintf(f, "accounts_width = %d   # %% of the screen for Accounts (4 columns, over 170)\n",
 	        col_pct[2]);
+	fprintf(f, "# Programs (empty: the default). editor is used when $VISUAL and $EDITOR\n"
+	           "# are not set (default vi, Windows Notepad); pdf_viewer opens PDF files and\n"
+	           "# html_viewer web links (default: the desktop's program, xdg-open). A command\n"
+	           "# may have arguments; the file or link is added at the end.\n");
+	fprintf(f, "editor = %s\npdf_viewer = %s\nhtml_viewer = %s\n", cfg_editor, cfg_pdf_viewer,
+	        cfg_html_viewer);
 	if (*last_account) fprintf(f, "last_account = %s\n", last_account);
 	if (master_check) fprintf(f, "master_check = %s\n", master_check);
 	for (int i = 0; i < naccts; i++) {

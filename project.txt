@@ -13,13 +13,11 @@ The README describes the same program for its users.
 - Written in C (C11, POSIX), one program called `mcm`; its full name is
   Mail Commander, used where there is room (--version, the Windows window
   title, the README); mcm where space is needed (menu bar, command, paths).
-- Called emsg up to 0.94. At start, ~/.config/emsg and ~/.local/share/emsg
-  (Windows: %APPDATA%\emsg, %LOCALAPPDATA%\emsg) are renamed to mcm when
-  no mcm folder exists yet, emsg.conf to mcm.conf, account paths into the
-  old data folder are rewritten, and a POP3 folder's .emsg-pop3-state
-  becomes .mcm-pop3-state. The master password check keeps its old
-  additional data "emsg master password check" and plaintext "emsg", or
-  existing stored passwords could not be unlocked.
+- Called emsg up to 0.94 (since 0.991 its settings are no longer
+  converted: only ~/.config/mcm and ~/.local/share/mcm are used). The
+  master password check keeps its old additional data "emsg master
+  password check" and plaintext "emsg", or existing stored passwords could
+  not be unlocked.
 - ncurses with wide characters (ncursesw) for windows, keys and mouse.
 - OpenSSL (1.1.1 or 3.x) or LibreSSL for TLS, random numbers and password
   encryption; iconv for character sets.
@@ -159,6 +157,9 @@ section per account:
   folders_width = 25         percent of the screen
   list_width = 45            percent (with three or four columns: of what is left)
   accounts_width = 15        percent of the screen (four columns)
+  editor =                   when $VISUAL/$EDITOR are not set (empty: vi)
+  pdf_viewer =               PDF attachments (empty: xdg-open)
+  html_viewer =              http/https/ftp links (empty: xdg-open)
   last_account = Work
   master_check = enc1$...    the word "emsg" encrypted with the master password
 
@@ -263,6 +264,23 @@ Local (src/local.c):
 - MH: numbered files, flags in the unseen/replied/flagged sequences of
   .mh_sequences (rewritten as a new file, other sequences kept); a saved
   message gets the next free number.
+- Dovecot sdbox (0.990, read only; dbox.c): a root with mailboxes/ (no
+  storage/: that is mdbox, refused in local_open) is walked like a directory
+  (walk_dir, l->dbox set: names shown mUTF-7 decoded); a directory with
+  dbox-Mails/ is an LF_SDBOX folder (subfolders beside dbox-Mails). Messages
+  are the u.UID files (key = UID). dbox_locate: header line "2 M<hex> C..."
+  gives the message header size; the header "\001\002N <8> <16 hex size>..\n"
+  gives the size; the message follows. Flags (dbox_flags): dovecot.index
+  (major 7, little-endian: header_size @4, record_size @8, compat @12,
+  indexid @16, messages_count @32, log_file_seq @60, head offset @68;
+  records uid u32 + flags u8), then the transaction log from the index's
+  head offset (.log, or .log.2 from there then all of .log; no index: both
+  whole): APPEND (8-byte uid+flags records), FLAG_UPDATE (uid1 uid2 add
+  remove, 12 bytes); sizes in Dovecot's offset form (big-endian, 7 bits per
+  byte, <<2). Index files in dbox-Mails/, else the mailbox directory.
+  Changes: dbox-Mails mtime (messages), log mtime+size (flags). Seen set in
+  mcm stays in memory (as mbox); append, remove, create, rename, delete
+  refused. mail_compress output (gzip zstd bzip2 xz lz4 magic) is reported.
 - A directory: every Maildir, mbox file and MH folder under it is a folder
   (subdirectories nest); $MAIL is INBOX when none is found.
 - Sent and Drafts are listed before they exist; the first message saved
@@ -273,7 +291,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.989 Quit Mail Reply Forward Account Config F1=Menu  date time
+  mcm 0.992 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -295,8 +313,18 @@ Local (src/local.c):
   A.hls = 1: draw_text_line paints every match (towlower compare on the
   tab-expanded wide line, within one display line) in CP_HIGHLIGHT, in
   every message, until :noh.
-- ui_run_editor() (ui.c): $VISUAL/$EDITOR via sh -c "exec $0 $2 \"$1\""
-  (Windows win_run), SIGINT ignored meanwhile; also used by the editor's :e.
+- ui_run_editor() (ui.c): ui_editor_cmd() ($VISUAL, $EDITOR, editor in
+  mcm.conf = cfg_editor, else vi / notepad), run by ui_run_program():
+  sh -c "exec $0 $2 \"$1\"" (Windows win_run), SIGINT ignored meanwhile;
+  also used by the editor's :e.
+- Viewers (0.992, attach.c): pdf_viewer / html_viewer in mcm.conf
+  (cfg_pdf_viewer, cfg_html_viewer in main.c). open_with_viewer() sends a
+  .pdf path to pdf_viewer, open_url() (links window) http/https/ftp links
+  to html_viewer; empty: xdg-open / ShellExecute as before. run_viewer():
+  console programs (console_program: w3m lynx links elinks less vi nano
+  ...) or no $DISPLAY/$WAYLAND_DISPLAY -> ui_run_program (waits, in the
+  terminal); else sh -c "exec $0 \"$1\"" in a detached grandchild.
+  Windows: CreateProcess, not waited for. HTML attachments stay refused.
 - Status line: "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
   with the focus on the email list, "Enter Open  F5 Refresh  Q/^Q Quit" on
   the folders and accounts (no F1, Tab, column or L/O hint: F1=Menu is in
@@ -540,8 +568,9 @@ Main screen:
                        the border; a number no item has restarts at the
                        digit), Enter opens: only http https ftp mailto,
                        no control characters, spaces as %20, then
-                       open_with_viewer (attach.c: xdg-open via a
-                       double fork, Windows ShellExecute).
+                       open_url (attach.c: html_viewer from mcm.conf,
+                       else xdg-open via a double fork, Windows
+                       ShellExecute).
   Up / Down            (message window, 0.984; Tab switches windows as
                        before) link_step: the links of the rendered text
                        (collect_stops, cached in stops until the next
@@ -947,7 +976,8 @@ the login times calculated from them.
   src/store.c     one interface for IMAP, POP3 and local folders
   src/imap.c      IMAP client
   src/pop3.c      POP3 client
-  src/local.c     Maildir, mbox, MH, POP3 inbox state
+  src/local.c     Maildir, mbox, MH, sdbox, POP3 inbox state
+  src/dbox.c      Dovecot sdbox files, index and transaction log
   src/net.c       TCP, TLS, STARTTLS, certificate checks
   src/smtp.c      SMTP submission
   src/compose.c   header checks, addresses, encoding, folding, MIME,

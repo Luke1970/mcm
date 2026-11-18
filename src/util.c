@@ -8,6 +8,8 @@ volatile sig_atomic_t quit_requested;
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
+#include <sys/stat.h>
 
 static void oom(void)
 {
@@ -34,6 +36,21 @@ void *xrealloc(void *p, size_t n)
 	p = realloc(p, n ? n : 1);
 	if (!p) oom();
 	return p;
+}
+
+int make_dirs(const char *p)
+{
+	char *d = xstrdup(p);
+	for (char *s = d + 1; *s; s++)
+		if ((*s == '/' || *s == '\\') && s[-1] != ':') {   /* (not "C:\") */
+			char c = *s;
+			*s = '\0';
+			mkdir(d, 0700);
+			*s = c;
+		}
+	int r = mkdir(d, 0700) == 0 || errno == EEXIST ? 0 : -1;
+	free(d);
+	return r;
 }
 
 char *xstrdup(const char *s)

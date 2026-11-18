@@ -996,13 +996,12 @@ static void put_lines(ed_t *e, int below)
 	e->modified = 1;
 }
 
-/* Write the text to a temporary file, run $VISUAL/$EDITOR on it, read it back. */
+/* Write the text to a temporary file, run the editor (ui_editor_cmd) on it,
+ * read it back. */
 static void external_editor(ed_t *e)
 {
-	const char *ed = getenv("VISUAL");
-	if (!ed || !*ed) ed = getenv("EDITOR");
+	const char *ed = ui_editor_cmd();
 #ifdef _WIN32
-	if (!ed || !*ed) ed = "notepad";
 	const char *tmp = getenv("TEMP");
 	char path[512];
 	int fd = -1;
@@ -1011,7 +1010,6 @@ static void external_editor(ed_t *e)
 		fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_BINARY, 0600);
 	}
 #else
-	if (!ed || !*ed) ed = "vi";
 	const char *tmp = getenv("TMPDIR");
 	char path[512];
 	snprintf(path, sizeof path, "%s/mcm-XXXXXX.eml", tmp && *tmp ? tmp : "/tmp");

@@ -855,7 +855,8 @@ static int collect_links(const char *t, size_t len, link_t **out)
 	return n;
 }
 
-/* Open url in the desktop's browser (mailto: its mail program). Only
+/* Open url in html_viewer from mcm.conf or the desktop's browser (mailto:
+ * its mail program). Only
  * http, https, ftp and mailto: a link in a mail must not run a program or
  * open a local file. */
 static void open_link(const char *url)
@@ -871,7 +872,7 @@ static void open_link(const char *url)
 		else buf_addc(&b, (char)*s);
 	}
 	if (!good) set_status("Not opened: mcm opens only http, https, ftp and mailto links");
-	else if (open_with_viewer(b.d) != 0) set_status("Error: cannot open %s", b.d);
+	else if (open_url(b.d) != 0) set_status("Error: cannot open %s", b.d);
 	else set_status("Opened %s", b.d);
 	buf_free(&b);
 }

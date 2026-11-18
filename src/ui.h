@@ -102,9 +102,14 @@ int  ui_list_dialog(const char *title, const char *const *items, int n, int def,
 int  ui_list_dialog_num(const char *title, const char *const *items, const int *nums, int n,
                         int key, const char *hint, ui_bg_fn bg);
 
-/* Run $VISUAL/$EDITOR (vi; Windows: Notepad) on a file, curses put aside;
+/* Run the editor (ui_editor_cmd) on a file, curses put aside;
  * readonly: vi/vim/nvim/view get -R. Returns its exit status, -1 failed. */
 int  ui_run_editor(const char *path, int readonly);
+const char *ui_editor_cmd(void);   /* $VISUAL, $EDITOR, mcm.conf editor, vi */
+extern char cfg_editor[256];
+/* Run command cmd (with arguments) on path in the terminal, waiting for
+ * it; flag goes before path. Its exit status, -1 when it could not run. */
+int  ui_run_program(const char *cmd, const char *path, const char *flag);       /* editor in mcm.conf (empty: none) */
 
 /* Pick a file: folders open, a file is chosen (its full path, malloc'd);
  * NULL for Esc. dir is where to start ("" = the current directory) and is

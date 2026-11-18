@@ -26,6 +26,8 @@ void *xcalloc(size_t n, size_t sz);
 void *xrealloc(void *p, size_t n);
 char *xstrdup(const char *s);
 char *xstrndup(const char *s, size_t n);   /* binary safe, always NUL-terminated */
+/* Make directory p and the ones above it that are missing (0700). 0, or -1. */
+int   make_dirs(const char *p);
 
 void  buf_add(buf_t *b, const void *p, size_t n);
 void  buf_adds(buf_t *b, const char *s);

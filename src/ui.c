@@ -941,18 +941,29 @@ char *ui_file_dialog(const char *title, char *dir, size_t dirsize, ui_bg_fn bg)
 	}
 }
 
-/* Run $VISUAL or $EDITOR (vi; Windows: Notepad) on the file at path, with
- * curses put aside meanwhile. readonly: vi, vim, nvim and view get -R.
- * Returns the editor's exit status, -1 when it could not run. */
-int ui_run_editor(const char *path, int readonly)
+char cfg_editor[256];
+
+/* The editor: $VISUAL, $EDITOR, editor in mcm.conf, else vi (Windows:
+ * Notepad). */
+const char *ui_editor_cmd(void)
 {
 	const char *ed = getenv("VISUAL");
 	if (!ed || !*ed) ed = getenv("EDITOR");
+	if (!ed || !*ed) ed = cfg_editor;
 #ifdef _WIN32
-	if (!ed || !*ed) ed = "notepad";
+	if (!*ed) ed = "notepad";
 #else
-	if (!ed || !*ed) ed = "vi";
+	if (!*ed) ed = "vi";
 #endif
+	return ed;
+}
+
+/* Run the editor (ui_editor_cmd) on the file at path, with curses put
+ * aside meanwhile. readonly: vi, vim, nvim and view get -R.
+ * Returns the editor's exit status, -1 when it could not run. */
+int ui_run_editor(const char *path, int readonly)
+{
+	const char *ed = ui_editor_cmd();
 	/* the program's name: the first word of the command, without its folder */
 	const char *name = ed, *sp = ed + strcspn(ed, " \t");
 	for (const char *c = ed; c < sp; c++)
@@ -961,8 +972,14 @@ int ui_run_editor(const char *path, int readonly)
 	int vi = (nl == 2 && !strncmp(name, "vi", 2)) || (nl == 3 && !strncmp(name, "vim", 3)) ||
 	         (nl == 4 && (!strncmp(name, "nvim", 4) || !strncmp(name, "view", 4))) ||
 	         (nl == 7 && !strncasecmp(name, "vim.exe", 7));
-	const char *flag = readonly && vi ? "-R" : "";
+	return ui_run_program(ed, path, readonly && vi ? "-R" : "");
+}
 
+/* Run the command cmd (it may have arguments) with flag and path after it,
+ * in the terminal, curses put aside meanwhile; waits for it. Returns its
+ * exit status, -1 when it could not run. */
+int ui_run_program(const char *ed, const char *path, const char *flag)
+{
 	def_prog_mode();
 	endwin();
 #ifdef _WIN32

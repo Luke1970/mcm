@@ -3,7 +3,8 @@
 # @VERSION@ becomes the version number. Keep lines within 80 columns.
 Mail Commander (mcm) @VERSION@ - console mail client.
 
--Supports imap(s) pop3(s), maildir, mbox and MH mailstore formats.
+-Supports imap(s) pop3(s), maildir, mbox and MH mailstore formats, and reads
+ Dovecot sdbox.
 -Can be fully controled by keyboard, has limited mouse support.
 -Can handle long lists of emails and display large emails, more info under
 Limitations..
@@ -64,6 +65,12 @@ WHERE - the kinds of mail mcm reads:
   unseen/replied/flagged lists in .mh_sequences; subdirectories are folders.
       mcm ~/Mail/inbox
 
+  sdbox - Dovecot's single-dbox: mailboxes/NAME/dbox-Mails/u.1, u.2 ...
+      mcm ~/sdbox
+    Only read: flags come from Dovecot's index, "seen" set in mcm lasts
+    until exit; nothing is copied into, moved or deleted. mdbox cannot be
+    read (use Dovecot's IMAP, or doveadm sync to Maildir).
+
   A directory of folders - every Maildir, mbox file and MH folder under it
   becomes a folder (subdirectories nest); $MAIL is INBOX if none is found.
       mcm ~/Mail
@@ -93,8 +100,13 @@ Files:
   ~/.config/mcm/mcm.conf        accounts and settings (mode 0600)
   ~/.config/mcm/NAME.theme      colors, read at every start
   ~/.config/mcm/certs           certificates you chose to always accept
-  Up to 0.94 the program was called emsg; its ~/.config/emsg and
-  ~/.local/share/emsg are renamed to mcm at the first start.
+
+In mcm.conf, editor = PROGRAM is used when $VISUAL and $EDITOR are not set
+(else vi; Windows Notepad); pdf_viewer = PROGRAM opens PDF attachments and
+html_viewer = PROGRAM web links (else the desktop's program, xdg-open).
+
+Source: https://github.com/Luke1970/mcm
+  git clone https://github.com/Luke1970/mcm.git && cd mcm && make
 
 Libraries and software used:
   ncurses       the screen, keys and mouse (wide-character build, libncursesw)
@@ -118,7 +130,8 @@ Thanks to:
   David McGrew and John Viega for GCM.
   D. J. Bernstein for Maildir, Sam Varshavchik for Maildir++, the RAND
   Corporation (Bruce Borden, Stockton Gaines, Norman Shapiro) and the nmh
-  developers for MH, and Unix mail for mbox.
+  developers for MH, Unix mail for mbox, and Timo Sirainen and the Dovecot
+  developers for dbox.
   The authors of the standards mcm follows, among them:
     IMAP     Mark Crispin (RFC 3501); Alexey Melnikov, Chris Newman (RFC 5092)
     POP3     John Myers, Marshall Rose (RFC 1939); Chris Newman (RFC 2595)

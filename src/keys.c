@@ -36,7 +36,7 @@ void show_about(void)
 		"Mail Commander (mcm) @VERSION@",
 		"",
 		"A console email client in the spirit of PC Tools and",
-		"Midnight Commander: IMAPS, POP3S, Maildir, mbox and MH.",
+		"Midnight Commander: IMAPS, POP3S, Maildir, mbox, MH, sdbox.",
 		"",
 		"https://github.com/Luke1970/mcm",
 		"",

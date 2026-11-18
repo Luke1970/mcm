@@ -1,5 +1,6 @@
-/* local.c - Maildir and mbox folders, and the POP3 inbox (see local.h) */
+/* local.c - Maildir, MH, mbox and sdbox folders, and the POP3 inbox (see local.h) */
 #include "local.h"
+#include "dbox.h"
 #include "mime.h"
 #include "util.h"
 
@@ -37,7 +38,7 @@
 #define MAX_DEPTH     6            /* directory levels searched for folders */
 #define POP3_REFRESH  300          /* seconds between POP3 sessions when idle */
 
-enum { LF_MAILDIR, LF_MBOX, LF_MH, LF_POP3, LF_DIR, LF_NEW_MAILDIR, LF_NEW_MBOX, LF_NEW_MH };
+enum { LF_MAILDIR, LF_MBOX, LF_MH, LF_POP3, LF_DIR, LF_SDBOX, LF_NEW_MAILDIR, LF_NEW_MBOX, LF_NEW_MH };
 
 typedef struct {
 	char *name;      /* folder name used by the caller */
@@ -49,11 +50,12 @@ typedef struct {
 typedef struct {
 	uint32_t  uid, size;
 	char     *key;       /* identity across rescans: file base name, Message-ID or offset, UIDL */
-	char     *file;      /* Maildir: "cur/NAME" or "new/NAME" */
-	long long off;       /* mbox: message start (after the From_ line) */
+	char     *file;      /* Maildir: "cur/NAME" or "new/NAME"; sdbox: "dbox-Mails/u.N" */
+	long long off;       /* mbox: message start (after the From_ line); sdbox: in the file */
 	size_t    len;
 	int       num;       /* POP3 message number in the current session */
 	int       seen, answered, flagged, deleted, have_hdr;
+	int       mine;      /* mbox, sdbox: flags set in mcm (memory only): 1 seen 2 answered 4 flagged */
 	int       att;       /* an attachment in the first HDR_MAX bytes */
 	time_t    date;
 	char     *from, *subject;
@@ -72,6 +74,7 @@ struct local {
 	int       nf;
 	int       new_kind;    /* LF_NEW_*: the kind a new folder gets, -1 none */
 	char      sub_delim;   /* '.' Maildir++, '/' directories */
+	int       dbox;        /* the root is a Dovecot sdbox tree (read only) */
 
 	pop3_t   *pop;
 	char     *state_file;
@@ -187,6 +190,26 @@ static int is_mh(const char *p)
 	return r;
 }
 
+/* A Dovecot sdbox mailbox: a directory with dbox-Mails/ in it. */
+static int is_sdbox(const char *p)
+{
+	char *d = path_join(p, DBOX_MAILS);
+	int r = is_dir(d);
+	free(d);
+	return r;
+}
+
+/* The root of a dbox tree: mailboxes/ (sdbox), with storage/ (mdbox). */
+static int dbox_root(const char *p, int *mdbox)
+{
+	char *mb = path_join(p, "mailboxes"), *st = path_join(p, "storage");
+	int r = is_dir(mb);
+	*mdbox = r && is_dir(st);
+	free(mb);
+	free(st);
+	return r;
+}
+
 static void msg_clear(lmsg *m)
 {
 	free(m->key);
@@ -265,19 +288,7 @@ void local_free(local_t *l)
 
 const char *local_error(local_t *l) { return l->err; }
 
-static int mkdirs(const char *p)
-{
-	char *d = xstrdup(p);
-	for (char *s = d + 1; *s; s++)
-		if (*s == '/') {
-			*s = '\0';
-			mkdir(d, 0700);
-			*s = '/';
-		}
-	int r = mkdir(d, 0700) == 0 || errno == EEXIST ? 0 : -1;
-	free(d);
-	return r;
-}
+#define mkdirs make_dirs
 
 int local_open(local_t *l, const char *root, int create)
 {
@@ -295,6 +306,11 @@ int local_open(local_t *l, const char *root, int create)
 		}
 	} else if (!S_ISDIR(st.st_mode) && !is_mbox(root)) {
 		seterr(l, "%s is not a mailbox (an mbox file, a Maildir or a directory)", root);
+		return -1;
+	}
+	int mdbox;
+	if (dbox_root(root, &mdbox) && mdbox) {
+		seterr(l, "Dovecot mdbox cannot be read (use IMAP or doveadm sync)");
 		return -1;
 	}
 	return 0;
@@ -431,7 +447,8 @@ static void walk_dir(local_t *l, const char *dir, const char *prefix, int depth,
 	if (!d) return;
 	struct dirent *e;
 	while ((e = readdir(d))) {
-		if (e->d_name[0] == '.' || all_digits(e->d_name)) continue;   /* MH messages are numbers */
+		if (e->d_name[0] == '.' || all_digits(e->d_name) || !strcmp(e->d_name, DBOX_MAILS))
+			continue;                    /* MH messages are numbers; sdbox messages */
 		char *p = path_join(dir, e->d_name);
 		buf_t name = {0};
 		if (*prefix) {
@@ -439,7 +456,10 @@ static void walk_dir(local_t *l, const char *dir, const char *prefix, int depth,
 			buf_addc(&name, '/');
 		}
 		buf_adds(&name, e->d_name);
-		if (is_maildir(p)) {
+		if (is_sdbox(p)) {
+			add_folder(l, buf_cstr(&name), p, LF_SDBOX, '/');   /* subfolders inside */
+			walk_dir(l, p, buf_cstr(&name), depth + 1, cnt);
+		} else if (is_maildir(p)) {
 			add_folder(l, buf_cstr(&name), p, LF_MAILDIR, '/');
 			cnt[0]++;
 		} else if (is_mh(p)) {
@@ -503,7 +523,18 @@ static void scan_folders(local_t *l)
 	int cnt[3] = {0, 0, 0}, new_kind = -1;
 	char sub_delim = '/';
 	const char *root = l->root;
-	if (root && is_maildir(root)) {
+	int mdbox = 0;
+	l->dbox = 0;
+	if (root && dbox_root(root, &mdbox) && !mdbox) {
+		/* Dovecot sdbox: mailboxes/NAME/dbox-Mails; names in modified UTF-7 */
+		char *mb = path_join(root, "mailboxes");
+		walk_dir(l, mb, "", 0, cnt);
+		free(mb);
+		l->dbox = 1;
+	} else if (root && is_sdbox(root)) {
+		if (!l->pop) add_folder(l, "INBOX", root, LF_SDBOX, '/');
+		l->dbox = 1;
+	} else if (root && is_maildir(root)) {
 		if (!l->pop) add_folder(l, "INBOX", root, LF_MAILDIR, '.');
 		maildirpp(l, root);
 		new_kind = LF_NEW_MAILDIR;
@@ -562,7 +593,7 @@ int local_list(local_t *l, folder_t **out, int *nout)
 		f[i].delim = x->delim;
 		const char *last = strrchr(x->name, x->delim);
 		last = last ? last + 1 : x->name;
-		f[i].display = x->delim == '.' ? mutf7_decode(last) : xstrdup(last);
+		f[i].display = x->delim == '.' || l->dbox ? mutf7_decode(last) : xstrdup(last);
 		for (const char *s = x->name; *s; s++) f[i].depth += *s == x->delim;
 		f[i].noselect = x->kind == LF_DIR;
 		if (!strcasecmp(x->name, "Sent")) f[i].special = FOLDER_SENT;
@@ -954,6 +985,66 @@ static int scan_pop3(local_t *l, lmsg **out, int *nout)
 	return 0;
 }
 
+/* sdbox: the files u.UID in dbox-Mails; the flags from Dovecot's index
+ * (none there: shown as new). */
+static int scan_sdbox(local_t *l, const char *path, lmsg **out, int *nout)
+{
+	char *dp = path_join(path, DBOX_MAILS);
+	DIR *d = opendir(dp);
+	free(dp);
+	if (!d) {
+		seterr(l, "%s/" DBOX_MAILS ": %s", path, strerror(errno));
+		return -1;
+	}
+	dbox_fl *fl;
+	int nfl;
+	dbox_flags(path, &fl, &nfl);
+	lmsg *m = NULL;
+	int n = 0;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		if (strncmp(e->d_name, "u.", 2) || !all_digits(e->d_name + 2)) continue;
+		m = xrealloc(m, sizeof *m * (size_t)(n + 1));
+		lmsg *x = &m[n++];
+		memset(x, 0, sizeof *x);
+		x->key = xstrdup(e->d_name + 2);
+		x->file = path_join(DBOX_MAILS, e->d_name);
+		x->off = -1;                        /* found when it is read */
+		int f = dbox_flag_of(fl, nfl, (uint32_t)strtoul(e->d_name + 2, NULL, 10));
+		if (f > 0) {
+			x->seen = !!(f & DBOX_SEEN);
+			x->answered = !!(f & DBOX_ANSWERED);
+			x->flagged = !!(f & DBOX_FLAGGED);
+			x->deleted = !!(f & DBOX_DELETED);
+		}
+	}
+	closedir(d);
+	free(fl);
+	if (n) qsort(m, (size_t)n, sizeof *m, lmsg_order);
+	*out = m;
+	*nout = n;
+	return 0;
+}
+
+/* sdbox: open message m's file and find the message in it (fp at its
+ * start). NULL with the error set. */
+static FILE *sdbox_open(local_t *l, const lfolder *f, lmsg *m)
+{
+	char *p = path_join(f->path, m->file);
+	FILE *fp = fopen(p, "rb");
+	free(p);
+	if (!fp) {
+		seterr(l, "cannot read the message: %s (it may have been removed)", strerror(errno));
+		return NULL;
+	}
+	if (dbox_locate(fp, &m->off, &m->len) != 0 || fseeko(fp, (off_t)m->off, SEEK_SET) != 0) {
+		fclose(fp);
+		seterr(l, "%s: not a dbox message file", m->file);
+		return NULL;
+	}
+	return fp;
+}
+
 static void stamp(local_t *l, const lfolder *f)
 {
 	struct stat st;
@@ -974,6 +1065,15 @@ static void stamp(local_t *l, const lfolder *f)
 	} else if (f->kind == LF_MBOX && stat(f->path, &st) == 0) {
 		l->mt_new = ST_MTIM(st);
 		l->msize = st.st_size;
+	} else if (f->kind == LF_SDBOX) {
+		char *a = path_join(f->path, DBOX_MAILS), *b = dbox_log_path(f->path);
+		if (stat(a, &st) == 0) l->mt_new = ST_MTIM(st);    /* messages added/removed */
+		if (stat(b, &st) == 0) {                          /* flags */
+			l->mt_cur = ST_MTIM(st);
+			l->msize = st.st_size;
+		}
+		free(a);
+		free(b);
 	}
 }
 
@@ -986,6 +1086,7 @@ static int scan(local_t *l, const lfolder *f, lmsg **m, int *n)
 	case LF_MH:      return scan_mh(l, f->path, m, n);
 	case LF_MBOX:    return scan_mbox(l, f->path, m, n);
 	case LF_POP3:    return scan_pop3(l, m, n);
+	case LF_SDBOX:   return scan_sdbox(l, f->path, m, n);
 	case LF_NEW_MAILDIR: case LF_NEW_MBOX: case LF_NEW_MH: return 0;   /* not created yet: empty */
 	}
 	seterr(l, "%s is not a mailbox", f->name);
@@ -1081,19 +1182,39 @@ static int load_header(local_t *l, lmsg *m)
 		buf_free(&h);
 		return 0;
 	}
-	/* Maildir */
-	char *p = path_join(f->path, m->file);
-	FILE *fp = fopen(p, "r");
-	free(p);
+	/* Maildir, MH, sdbox */
+	FILE *fp;
+	size_t max = HDR_MAX;
+	if (f->kind == LF_SDBOX) {
+		fp = sdbox_open(l, f, m);
+		if (fp) {
+			m->size = (uint32_t)m->len;
+			if (m->len < max) max = m->len;
+		}
+	} else {
+		char *p = path_join(f->path, m->file);
+		fp = fopen(p, "r");
+		free(p);
+		struct stat st;
+		if (fp && fstat(fileno(fp), &st) == 0) m->size = (uint32_t)st.st_size;
+	}
 	if (!fp) {
 		parse_hdr(m, "", 0);          /* moved away meanwhile: show it empty */
 		return 0;
 	}
-	struct stat st;
-	if (fstat(fileno(fp), &st) == 0) m->size = (uint32_t)st.st_size;
 	char *b = xmalloc(HDR_MAX + 1);
-	size_t got = fread(b, 1, HDR_MAX, fp);
+	size_t got = fread(b, 1, max, fp);
 	fclose(fp);
+	const char *z = f->kind == LF_SDBOX ? dbox_compressed(b, got) : NULL;
+	if (z) {
+		parse_hdr(m, "", 0);
+		free(m->subject);
+		buf_t t = {0};
+		buf_printf(&t, "(compressed with %s: mcm cannot read it)", z);
+		m->subject = buf_steal(&t);
+		free(b);
+		return 0;
+	}
 	parse_hdr(m, b, header_len(b, got));
 	m->att = mime_has_attachment(b, got);
 	free(b);
@@ -1172,6 +1293,22 @@ static int load_raw(local_t *l, uint32_t uid)
 	l->raw_uid = 0;
 	if (f->kind == LF_POP3) {
 		if (pop_fetch(l, m, 1, &l->raw) != 0) return -1;
+	} else if (f->kind == LF_SDBOX) {
+		FILE *fp = sdbox_open(l, f, m);
+		if (!fp) return -1;
+		char tmp[16384];
+		size_t got, left = m->len;
+		while (left && (got = fread(tmp, 1, left < sizeof tmp ? left : sizeof tmp, fp)) > 0) {
+			buf_add(&l->raw, tmp, got);
+			left -= got;
+		}
+		fclose(fp);
+		const char *z = dbox_compressed(l->raw.d ? l->raw.d : "", l->raw.len);
+		if (z) {
+			buf_free(&l->raw);
+			seterr(l, "the message is compressed (%s, Dovecot's mail_compress): mcm cannot read it", z);
+			return -1;
+		}
 	} else if (f->kind == LF_MAILDIR || f->kind == LF_MH) {
 		char *p = path_join(f->path, m->file);
 		FILE *fp = fopen(p, "r");
@@ -1290,7 +1427,8 @@ static int set_flag(local_t *l, uint32_t uid, char flag)
 		return rc;
 	}
 	if (f->kind == LF_POP3) ps_set(l, m->key, flag);
-	return 0;   /* mbox: kept in memory only */
+	m->mine |= flag == 'S' ? 1 : flag == 'R' ? 2 : 4;
+	return 0;   /* mbox, sdbox: kept in memory only */
 }
 
 int local_mark_seen(local_t *l, uint32_t uid) { return set_flag(l, uid, 'S'); }
@@ -1359,12 +1497,14 @@ static void merge(local_t *l, lmsg *nm, int nn)
 			o->from = o->subject = o->addr = o->msgid = NULL;
 			if (!x->size) x->size = o->size;
 		}
+		if (cur(l)->kind == LF_MBOX || cur(l)->kind == LF_SDBOX) {   /* flags set here live in memory */
+			x->mine = o->mine;
+			x->seen |= o->mine & 1;
+			x->answered |= !!(o->mine & 2);
+			x->flagged |= !!(o->mine & 4);
+		}
 		if (x->seen != o->seen || x->answered != o->answered || x->flagged != o->flagged)
 			flags_changed = 1;
-		if (cur(l)->kind == LF_MBOX) {       /* "seen" set here lives in memory */
-			x->seen |= o->seen;
-			x->answered |= o->answered;
-		}
 		msg_clear(o);
 		res[nr++] = *x;
 		memset(x, 0, sizeof *x);
@@ -1651,6 +1791,10 @@ int local_remove(local_t *l, const uint32_t *uids, int n)
 		          "remove messages from it", f->name);
 		return -1;
 	}
+	if (f->kind == LF_SDBOX) {
+		seterr(l, "%s is a Dovecot sdbox folder: mcm only reads it", f->name);
+		return -1;
+	}
 	int rc = 0;
 	if (f->kind == LF_POP3) {
 		if (pop_sync(l) != 0) return -1;
@@ -1903,6 +2047,10 @@ int local_append(local_t *l, const char *name, const char *flags, const char *da
 		seterr(l, "messages cannot be stored in %s", name);
 		return -1;
 	}
+	if (f->kind == LF_SDBOX || l->dbox) {
+		seterr(l, "%s is a Dovecot sdbox folder: mcm only reads it", name);
+		return -1;
+	}
 	buf_t msg = {0};
 	to_lf(&msg, data, len);
 	int rc;
@@ -1998,6 +2146,10 @@ int local_create(local_t *l, const char *name)
 		seterr(l, "%s already exists", name);
 		return -1;
 	}
+	if (l->dbox) {
+		seterr(l, "Dovecot sdbox folders are read only in mcm");
+		return -1;
+	}
 	if (l->new_kind < 0) {
 		seterr(l, "%s is a single mailbox: it cannot hold other folders", l->root ? l->root : "");
 		return -1;
@@ -2052,6 +2204,10 @@ static lfolder *own_folder(local_t *l, const char *name, const char *what)
 	lfolder *f = find_folder(l, name);
 	if (!f) {
 		seterr(l, "no folder %s", name);
+		return NULL;
+	}
+	if (f->kind == LF_SDBOX || l->dbox) {
+		seterr(l, "%s is a Dovecot sdbox folder: mcm only reads it", name);
 		return NULL;
 	}
 	if (!strcasecmp(name, "INBOX") || f->kind == LF_POP3 || !strcmp(f->path, l->root ? l->root : "")) {

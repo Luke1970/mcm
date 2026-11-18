@@ -1,12 +1,34 @@
 # Mail Commander (mcm)
 
-A console email client in C/ncurses, styled after PC Tools and Midnight
-Commander. The program is called `mcm`.
+Mail Commander is a console based email client that supports multiple 
+email accounts, and can remember passwords if you choose so, encrypted
+with a master password (scrypt + AES-256-GCM).
 
-Up to version 0.94 it was called **emsg**. At its first start mcm renames
-the old settings folders (`~/.config/emsg` and `~/.local/share/emsg`, on
-Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
-`emsg.conf` to `mcm.conf`; accounts and stored passwords keep working.
+IMAPS, POP3S, and local mail (Maildir, mbox, MH and sdbox (read only))
+are supported.
+
+It is fast with large folders, because it only downloads what is visible
+on the screen. It tries to display HTML and Markdown inline. A summary
+of all links and attachments is shown at the end of the message.
+
+The interface and navigation are kept as simple as possible. F1 shows 
+all shortcuts. Most functions can be accessed direct with a single 
+keystroke and mouse selections are supported as well.
+
+Emails can be written with an internal editor. Or edited with an
+external editor as defined by $EDITOR as environment variable, or by
+`editor` in the config file when $EDITOR is not set. PDF files and web
+links can be opened with programs of your choice too (`pdf_viewer`,
+`html_viewer`, see [Programs](#programs)).
+
+Mail Commander is written in C, uses ncurses and should work in Linux, 
+*BSD and Windows.
+
+Initial layout consists of 2 windows, showing all the messages from a
+mail folder on the left and the highlighted message on the right.
+F1 explains all shortcuts. TAB and <- and -> cycle through the windows, 
+including a window where all mailfolders are listed, and a window
+where all known accounts are listed.
 
 ```
  Quit  Mail  Reply  Forward  Account  Config  F1=Menu                        Thu 12 Nov 2026
@@ -19,21 +41,25 @@ Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
  test@localhost  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 ```
 
-Features:
+## Getting the source
 
-- **IMAPS, POP3S and local mail** (Maildir, mbox, MH); several accounts;
-  never sends a password or mail unencrypted.
-- **Fast on huge folders**: only what is on screen is fetched, so a folder of
-  250,000 messages opens at once; a filter searches on the server.
-- **HTML and Markdown** mail shown as readable text; hex view of the raw
-  message.
-- **A vim-like editor** for new mail, replies and forwards, with
-  format=flowed, attachments and header checks before sending over SMTP.
-- **Stored passwords** only if you want, encrypted with a master password
-  (scrypt + AES-256-GCM).
-- Keyboard first, mouse optional; color themes.
-- Runs on **Linux, FreeBSD, OpenBSD, NetBSD and Windows 10/11**; an MS-DOS
-  version is being studied.
+The source is on GitHub: <https://github.com/Luke1970/mcm>. With git:
+
+```sh
+git clone https://github.com/Luke1970/mcm.git
+cd mcm
+```
+
+Later, `git pull` in that directory fetches the newest version (then run
+`make` again). Without git, download it as a zip file: on the GitHub page
+choose **Code → Download ZIP**, or
+
+```sh
+curl -LO https://github.com/Luke1970/mcm/archive/refs/heads/main.zip
+unzip main.zip && cd mcm-main
+```
+
+A ready-made Windows version is at <https://sc00by.nl/lucien/mcm/mcm.zip>.
 
 ## Build
 
@@ -309,6 +335,9 @@ message_wrap = 1
 folders_width = 25
 list_width = 45
 accounts_width = 15
+editor = nano
+pdf_viewer = zathura
+html_viewer = firefox --new-tab
 last_account = Work
 master_check = enc1$16$8$1$...
 
@@ -345,6 +374,38 @@ or RFC 2047 encoded when needed. **A** (Account) lists the accounts: Enter on th
 current one (marked `*`) changes its name, full name and stored password; Enter
 on another one, or on *New account*, switches to that account. A config
 file from emsg 0.3 (the old name, without sections) is read as one account.
+
+### Programs
+
+Three settings in `mcm.conf` choose the programs mcm starts. Empty (the
+default) means the usual choice:
+
+| Setting | Used for | When empty |
+|---|---|---|
+| `editor` | `:e` in the message window (view the message) and in the mail editor (edit the text) | `vi` (Windows: Notepad) |
+| `pdf_viewer` | opening a PDF attachment (**T**, or **K** then Enter) | the desktop's program (`xdg-open`; Windows: the program Windows uses) |
+| `html_viewer` | opening an http, https or ftp link (**K**, or Enter on a link) | the desktop's browser (`xdg-open`) |
+
+`editor` is only used when the environment variables `$VISUAL` and
+`$EDITOR` are not set (for example in `~/.bashrc`): those come first.
+A command may have arguments; the file or link is added at the end:
+
+```
+editor = nano -w
+pdf_viewer = evince
+html_viewer = w3m
+```
+
+Console programs (w3m, lynx, links, elinks, browsh, less, vi, vim, nano and
+a few more) run in the terminal: mcm steps aside and comes back when they
+end. Other programs are started next to mcm, which keeps running; without
+a graphical desktop (no `$DISPLAY` or `$WAYLAND_DISPLAY`) every program runs
+in the terminal. `mailto:` links always go to the desktop's mail program.
+HTML attachments are still never opened (scripts in them would run), only
+saved.
+
+There is no dialog for these settings: edit `mcm.conf` while mcm is not
+running (mcm writes the file when it ends).
 
 ### Stored passwords
 
@@ -655,7 +716,7 @@ the focus, the bottom line shows a reminder:
 
 | Command | Does |
 |---|---|
-| `:e` (`:view`, `:vi`, `:vim`) | open the message, as shown, in `$VISUAL`/`$EDITOR` (default `vi`, Windows Notepad); vi, vim, nvim and view get `-R` (read only). The temporary file is deleted afterwards |
+| `:e` (`:view`, `:vi`, `:vim`) | open the message, as shown, in `$VISUAL`/`$EDITOR`, else `editor` from mcm.conf (default `vi`, Windows Notepad); vi, vim, nvim and view get `-R` (read only). The temporary file is deleted afterwards |
 | `:q` (`:q!`, `:qa`, `:x`, `:wq`) | quit mcm |
 | `:w` | save the message as **S** does |
 | `:w FILE` | save the message, as shown, to FILE (`~` allowed); `:w! FILE` replaces an existing file |
@@ -848,7 +909,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.989 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.992 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).

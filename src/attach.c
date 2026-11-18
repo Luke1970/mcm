@@ -206,10 +206,82 @@ static int att_write(att_t *a, const char *dir, buf_t *path)
 	return 0;
 }
 
+#ifndef _WIN32
+/* Programs that need the terminal: mcm waits while they run. */
+static int console_program(const char *cmd)
+{
+	static const char *const tui[] = {"w3m", "lynx", "links", "links2", "elinks", "browsh",
+		"carbonyl", "less", "more", "most", "vi", "vim", "nvim", "view", "nano", "mc",
+		"mcview", "fbpdf", "fbgs", "jfbview", NULL};
+	const char *name = cmd, *sp = cmd + strcspn(cmd, " \t");
+	for (const char *c = cmd; c < sp; c++)
+		if (*c == '/' || *c == '\\') name = c + 1;
+	size_t nl = (size_t)(sp - name);
+	for (int i = 0; tui[i]; i++)
+		if (strlen(tui[i]) == nl && !strncmp(name, tui[i], nl)) return 1;
+	return 0;
+}
+#endif
+
+/* Open path (a file or a link) with cmd from mcm.conf, which may have
+ * arguments: path is added at the end. A console program (or any program
+ * without a graphical desktop) runs in the terminal and mcm waits; others
+ * are started and left running. */
+static int run_viewer(const char *cmd, const char *path)
+{
+#ifdef _WIN32
+	char cl[2200];
+	snprintf(cl, sizeof cl, "%s \"%s\"", cmd, path);
+	STARTUPINFOA si = {.cb = sizeof si};
+	PROCESS_INFORMATION pi;
+	if (!CreateProcessA(NULL, cl, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return -1;
+	CloseHandle(pi.hProcess);
+	CloseHandle(pi.hThread);
+	return 0;
+#else
+	const char *x = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
+	if (console_program(cmd) || ((!x || !*x) && (!w || !*w))) {
+		int rc = ui_run_program(cmd, path, "");
+		clearok(curscr, TRUE);
+		return rc == 0 ? 0 : -1;
+	}
+	pid_t pid = fork();
+	if (pid < 0) return -1;
+	if (pid == 0) {
+		if (fork() == 0) {                 /* see open_with_viewer */
+			setsid();
+			int fd = open("/dev/null", O_RDWR);
+			if (fd >= 0) {
+				dup2(fd, 0);
+				dup2(fd, 1);
+				dup2(fd, 2);
+			}
+			execl("/bin/sh", "sh", "-c", "exec $0 \"$1\"", cmd, path, (char *)NULL);
+			_exit(127);
+		}
+		_exit(0);
+	}
+	int st;
+	waitpid(pid, &st, 0);
+	return 0;
+#endif
+}
+
+/* A web link (http, https, ftp) in html_viewer from mcm.conf, otherwise
+ * (and mailto:) as open_with_viewer. */
+int open_url(const char *url)
+{
+	if (*cfg_html_viewer && strncasecmp(url, "mailto:", 7)) return run_viewer(cfg_html_viewer, url);
+	return open_with_viewer(url);
+}
+
 /* Show a file (or a URL) with the program the desktop uses for it (not
- * waited for). */
+ * waited for); a PDF file with pdf_viewer from mcm.conf when set. */
 int open_with_viewer(const char *path)
 {
+	size_t pl = strlen(path);
+	if (*cfg_pdf_viewer && pl > 4 && !strcasecmp(path + pl - 4, ".pdf"))
+		return run_viewer(cfg_pdf_viewer, path);
 #ifdef _WIN32
 	HINSTANCE h = ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
 	return (INT_PTR)h > 32 ? 0 : -1;

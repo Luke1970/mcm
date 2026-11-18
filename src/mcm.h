@@ -51,7 +51,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.989"
+#define MCM_VERSION   "0.992"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -105,6 +105,9 @@ extern char      *master;          /* master password, in memory only once typed
 
 /* Settings of the program (mcm.conf, before the accounts) */
 extern int wrap_width;             /* new mail is wrapped at this column */
+/* Programs from mcm.conf; empty: the default. pdf_viewer opens PDF files,
+ * html_viewer web links (the editor: cfg_editor in ui.h). */
+extern char cfg_pdf_viewer[256], cfg_html_viewer[256];
 extern int col_pct[3];  /* window widths in %: [0] Folders (of
                                         * the screen), [1] the list (of what is
                                         * left of it), [2] Accounts (4 columns) */
@@ -205,7 +208,6 @@ extern const int nfolder_menu;
 typedef struct { int n, col[4], x[4], w[4]; } cols_t;
 
 /* config.c */
-void migrate_from_emsg(void);
 void config_path(char *p, size_t n, const char *file);
 void set_secret(char **slot, char *v);
 account_t *account_new(const char *name);
@@ -283,6 +285,7 @@ void login_bg(void);
 void att_cleanup(void);
 void attachments(void);
 int open_with_viewer(const char *path);
+int open_url(const char *url);
 /* The links window's share: the open message's attachments as list items
  * ("name  (type, size)", malloc'd; returns how many), Open/Save for one of
  * them, and freeing them again. */

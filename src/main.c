@@ -14,6 +14,7 @@ char       last_account[64];
 char      *master_check;
 char      *master;
 int wrap_width = 72;
+char cfg_pdf_viewer[256], cfg_html_viewer[256];
 int col_pct[3] = {25, 45, 15};
 int dragging;
 int drag_border;
@@ -102,7 +103,7 @@ static int choose_type(void)
 	static const char *const items[] = {
 		"IMAP   mail and folders stay on the server (IMAPS)",
 		"POP3   INBOX from the server (POP3S); Sent and Drafts here",
-		"Local  Maildir, mbox or MH folders on this computer",
+		"Local  Maildir, mbox, MH or sdbox folders on this computer",
 	};
 	return ui_list_dialog("New account: where is the mail?", items, 3, 0, "Enter choose   Esc cancel",
 	                      login_bg);
@@ -134,7 +135,7 @@ static int open_local_account(void)
 				{"E-mail address", ac->user, sizeof ac->user, 0, 1},
 				{"Mail folders", path, sizeof path, 0, 0},
 			};
-			if (!err) err = "Maildir, mbox, MH folder, or a directory of them (~ = home)";
+			if (!err) err = "Maildir, mbox, MH, sdbox, or a directory of them (~ = home)";
 			if (ui_input_dialog("Local mailboxes", f, 4, err, login_bg) < 0) return -1;
 			if (check_name(str_trim(name), &err) != 0) continue;
 			snprintf(ac->name, sizeof ac->name, "%s", name);
@@ -206,12 +207,6 @@ static int do_login(void)
 				char full[1024], state[1100];
 				expand_home(full, sizeof full, ac->path);
 				snprintf(state, sizeof state, "%s/.mcm-pop3-state", full);
-				struct stat sst;
-				if (stat(state, &sst) != 0) {          /* from emsg (before 0.95) */
-					char old[1100];
-					snprintf(old, sizeof old, "%s/.emsg-pop3-state", full);
-					rename(old, state);
-				}
 				if (store_open_local(A.im, full, state) == 0) return 0;
 				char m[700];
 				snprintf(m, sizeof m, "Local folders: %s", store_error(A.im));
@@ -526,7 +521,6 @@ void switch_account(const char *name)
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, "");
-	migrate_from_emsg();
 #ifdef SIGPIPE
 	signal(SIGPIPE, SIG_IGN);
 #endif
