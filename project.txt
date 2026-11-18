@@ -1,10 +1,10 @@
 Mail Commander (mcm) - requirements
 ===================================
 
-A console email client in C with ncurses, styled after PC Tools and Midnight
-Commander. This file lists everything needed to build mcm again from
-scratch: what it does, how it looks, how it behaves and what it must never do.
-The README describes the same program for its users.
+A console email client in C with ncurses. This file lists everything needed
+to build mcm again from scratch: what it does, how it looks, how it behaves
+and what it must never do. The README describes the same program for its
+users.
 
 
 1. General
