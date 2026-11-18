@@ -42,6 +42,8 @@ static void pick_add(const msg_t *m)
 	*c = *m;
 	c->from = xstrdup(m->from ? m->from : "");
 	c->subject = xstrdup(m->subject ? m->subject : "");
+	c->addr = m->addr ? xstrdup(m->addr) : NULL;
+	c->msgid = m->msgid ? xstrdup(m->msgid) : NULL;
 }
 
 static void pick_del(int i)
@@ -49,6 +51,8 @@ static void pick_del(int i)
 	if (i < 0 || i >= npick) return;
 	free(pick[i].from);
 	free(pick[i].subject);
+	free(pick[i].addr);
+	free(pick[i].msgid);
 	memmove(&pick[i], &pick[i + 1], sizeof *pick * (size_t)(npick - i - 1));
 	npick--;
 }
@@ -123,7 +127,7 @@ static void pw_draw(void)
 {
 	draw();
 	int y = 1, x = 0, h = LINES - 2, w = COLS;
-	if (h < 5 || w < 30) return;
+	if (h < 8 || w < 30) return;
 	uint64_t total = 0;
 	for (int i = 0; i < npick; i++) total += pick[i].size;
 	char ts[32], title[160];
@@ -147,7 +151,8 @@ static void pw_draw(void)
 	int sx = dx + (datew ? datew + 1 : 0);
 	ui_puts(y + 1, sx, "      Size", sizew, A_BOLD | A_UNDERLINE, CP_NORMAL);
 
-	prows = h - 3;
+	/* below the list: the sender and Message-ID of the message under the cursor */
+	prows = h - 6;
 	if (psel >= npick) psel = npick - 1;
 	if (psel < 0) psel = 0;
 	ensure_visible(&psel, &ptop, prows, npick);
@@ -175,6 +180,26 @@ static void pw_draw(void)
 		ui_puts(yy, sx, size, sizew, a, pair);
 	}
 	draw_scrollbar(COL_LIST, x + w - 1, y + 2, prows, npick, &ptop);
+
+	int dy = y + h - 4;
+	attron(COLOR_PAIR(CP_NORMAL));
+	mvadd_wch(dy, x, WACS_LTEE);
+	mvhline_set(dy, x + 1, WACS_HLINE, w - 2);
+	mvadd_wch(dy, x + w - 1, WACS_RTEE);
+	attroff(COLOR_PAIR(CP_NORMAL));
+	if (npick) {
+		const msg_t *m = &pick[psel];
+		buf_t b = {0};
+		if (*m->from && m->addr && strcmp(m->from, m->addr))
+			buf_printf(&b, "%s <%s>", m->from, m->addr);
+		else
+			buf_adds(&b, m->addr ? m->addr : *m->from ? m->from : "(unknown)");
+		ui_puts(dy + 1, cx, "From:", 12, A_BOLD, CP_NORMAL);
+		ui_puts(dy + 1, cx + 12, b.d, inner - 12, 0, CP_NORMAL);
+		ui_puts(dy + 2, cx, "Message-ID:", 12, A_BOLD, CP_NORMAL);
+		ui_puts(dy + 2, cx + 12, m->msgid ? m->msgid : "(none)", inner - 12, 0, CP_NORMAL);
+		buf_free(&b);
+	}
 
 	/* the keys, on the bottom border */
 	static const char *const keys[] = {"C=Copy", "M=Move", "D=Delete", "Enter=Unselect", "Esc=Close"};
@@ -260,23 +285,9 @@ static int create_trash(void)
 		set_status("Cannot create %s: %s", name, store_error(A.im));
 		return -1;
 	}
-	char *open = A.cur_folder >= 0 ? xstrdup(A.folders[A.cur_folder].name) : NULL;
-	folder_t *nf;
-	int nn;
-	if (store_list(A.im, &nf, &nn) != 0) {
-		free(open);
-		set_status("Cannot list folders: %s", store_error(A.im));
-		return -1;
-	}
-	folders_free(A.folders, A.nfolders);
-	A.folders = nf;
-	A.nfolders = nn;
-	A.cur_folder = -1;
-	for (int i = 0; open && i < nn; i++)
-		if (!strcmp(nf[i].name, open)) A.cur_folder = A.fsel = i;
-	free(open);
-	for (int i = 0; i < nn; i++)
-		if (!strcmp(nf[i].name, name)) return i;
+	if (folders_reload(NULL) != 0) return -1;
+	for (int i = 0; i < A.nfolders; i++)
+		if (!strcmp(A.folders[i].name, name)) return i;
 	return trash_folder();
 }
 

@@ -54,8 +54,10 @@ typedef struct {
 	size_t    len;
 	int       num;       /* POP3 message number in the current session */
 	int       seen, answered, flagged, deleted, have_hdr;
+	int       att;       /* an attachment in the first HDR_MAX bytes */
 	time_t    date;
 	char     *from, *subject;
+	char     *addr, *msgid;  /* the sender's address, Message-ID (or NULL) */
 } lmsg;
 
 typedef struct {
@@ -68,6 +70,8 @@ struct local {
 	char     *root;
 	lfolder  *f;
 	int       nf;
+	int       new_kind;    /* LF_NEW_*: the kind a new folder gets, -1 none */
+	char      sub_delim;   /* '.' Maildir++, '/' directories */
 
 	pop3_t   *pop;
 	char     *state_file;
@@ -189,6 +193,8 @@ static void msg_clear(lmsg *m)
 	free(m->file);
 	free(m->from);
 	free(m->subject);
+	free(m->addr);
+	free(m->msgid);
 	memset(m, 0, sizeof *m);
 }
 
@@ -228,6 +234,8 @@ local_t *local_new(void)
 	local_t *l = xcalloc(1, sizeof *l);
 	l->sel = -1;
 	l->uidnext = 1;
+	l->new_kind = -1;
+	l->sub_delim = '/';
 	return l;
 }
 
@@ -533,6 +541,8 @@ static void scan_folders(local_t *l)
 		}
 	}
 	qsort(l->f, (size_t)l->nf, sizeof *l->f, lf_cmp);
+	l->new_kind = new_kind;
+	l->sub_delim = sub_delim;
 
 	l->sel = -1;
 	if (open_name) {
@@ -573,6 +583,12 @@ static void parse_hdr(lmsg *m, const char *h, size_t n)
 	char *v = mime_header_raw(h, n, "From");
 	free(m->from);
 	m->from = mime_addr_display(v);
+	free(m->addr);
+	m->addr = mime_addr_email(v);
+	free(v);
+	free(m->msgid);
+	v = mime_header_raw(h, n, "Message-ID");
+	m->msgid = v && *str_trim(v) ? xstrdup(str_trim(v)) : NULL;
 	free(v);
 	free(m->subject);
 	m->subject = mime_header(h, n, "Subject");
@@ -838,7 +854,7 @@ static int scan_mbox(local_t *l, const char *path, lmsg **out, int *nout)
 	ssize_t got;
 	long long pos = 0, blank_at = -1;
 	int prev_blank = 1, in_hdr = 0;
-	buf_t hdr = {0};
+	buf_t hdr = {0}, peek = {0};    /* peek: the message's first HDR_MAX bytes */
 
 	/* end the message before `at` (dropping the blank line that separates messages) */
 	#define FINISH(at) do { \
@@ -848,6 +864,7 @@ static int scan_mbox(local_t *l, const char *path, lmsg **out, int *nout)
 			x_->len = (size_t)(e_ > x_->off ? e_ - x_->off : 0); \
 			x_->size = (uint32_t)x_->len; \
 			if (in_hdr) parse_hdr(x_, hdr.d ? hdr.d : "", hdr.len); \
+			x_->att = mime_has_attachment(peek.d ? peek.d : "", peek.len); \
 		} \
 	} while (0)
 
@@ -862,10 +879,12 @@ static int scan_mbox(local_t *l, const char *path, lmsg **out, int *nout)
 			x->off = pos;
 			in_hdr = 1;
 			hdr.len = 0;
+			peek.len = 0;
 			prev_blank = 0;
 			continue;
 		}
 		int blank = (got == 1 && line[0] == '\n') || (got == 2 && line[0] == '\r' && line[1] == '\n');
+		if (n && peek.len < HDR_MAX) buf_add(&peek, line, (size_t)got);
 		if (in_hdr && n) {
 			if (blank) {
 				parse_hdr(&m[n - 1], hdr.d ? hdr.d : "", hdr.len);
@@ -894,6 +913,7 @@ static int scan_mbox(local_t *l, const char *path, lmsg **out, int *nout)
 	#undef FINISH
 	free(line);
 	buf_free(&hdr);
+	buf_free(&peek);
 	fclose(f);
 	for (int i = 0; i < n; i++) {
 		if (!m[i].key) {
@@ -1057,6 +1077,7 @@ static int load_header(local_t *l, lmsg *m)
 			return -1;
 		}
 		parse_hdr(m, h.d ? h.d : "", h.len);
+		m->att = mime_has_attachment(h.d ? h.d : "", h.len);   /* (the header only) */
 		buf_free(&h);
 		return 0;
 	}
@@ -1074,6 +1095,7 @@ static int load_header(local_t *l, lmsg *m)
 	size_t got = fread(b, 1, HDR_MAX, fp);
 	fclose(fp);
 	parse_hdr(m, b, header_len(b, got));
+	m->att = mime_has_attachment(b, got);
 	free(b);
 	return 0;
 }
@@ -1100,7 +1122,9 @@ int local_fetch_headers(local_t *l, uint32_t from, uint32_t to, msg_t **out, int
 		r[i] = (msg_t){.seq = from + i, .uid = m->uid, .size = m->size, .seen = m->seen,
 		               .answered = m->answered, .flagged = m->flagged, .deleted = m->deleted,
 		               .date = m->date, .from = xstrdup(m->from ? m->from : ""),
-		               .subject = xstrdup(m->subject ? m->subject : "")};
+		               .subject = xstrdup(m->subject ? m->subject : ""),
+		               .addr = m->addr ? xstrdup(m->addr) : NULL,
+		               .msgid = m->msgid ? xstrdup(m->msgid) : NULL, .att = m->att};
 	}
 	*out = r;
 	*nout = (int)count;
@@ -1329,7 +1353,10 @@ static void merge(local_t *l, lmsg *nm, int nn)
 			x->date = o->date;
 			x->from = o->from;
 			x->subject = o->subject;
-			o->from = o->subject = NULL;
+			x->addr = o->addr;
+			x->msgid = o->msgid;
+			x->att = o->att;
+			o->from = o->subject = o->addr = o->msgid = NULL;
 			if (!x->size) x->size = o->size;
 		}
 		if (x->seen != o->seen || x->answered != o->answered || x->flagged != o->flagged)
@@ -1890,5 +1917,266 @@ int local_append(local_t *l, const char *name, const char *flags, const char *da
 		if (rc == 0) f->kind = LF_MBOX;
 	}
 	buf_free(&msg);
+	return rc;
+}
+
+/* ------------------------------------------------------------------ */
+/* Creating, renaming and deleting folders                             */
+
+/* Where folder name goes: Maildir++ ".A.B" in the root, else root/A/B. */
+static char *folder_path(local_t *l, const char *name)
+{
+	if (l->sub_delim != '.') return path_join(l->root, name);
+	buf_t d = {0};
+	buf_printf(&d, ".%s", name);
+	char *p = path_join(l->root, d.d);
+	buf_free(&d);
+	return p;
+}
+
+/* A name the folder scan would find again: no empty parts, none starting
+ * with '.' or made of digits (MH messages), no backslash. */
+static int name_ok(local_t *l, const char *name)
+{
+	const char *s = name;
+	for (;;) {
+		size_t n = strcspn(s, l->sub_delim == '.' ? "." : "/");
+		char part[256];
+		snprintf(part, sizeof part, "%.*s", (int)(n < 255 ? n : 255), s);
+		if (!n || part[0] == '.' || (l->sub_delim != '.' && all_digits(part)) || strchr(part, '\\') ||
+		    (l->sub_delim == '.' && strchr(part, '/'))) {
+			seterr(l, "'%s' cannot be used as a folder name here", name);
+			return 0;
+		}
+		if (!s[n]) return 1;
+		s += n + 1;
+	}
+}
+
+/* Directory layout: a Maildir or mbox file cannot hold subfolders (the
+ * scan does not look inside them). */
+static int parent_ok(local_t *l, const char *name)
+{
+	if (l->sub_delim == '.') return 1;
+	const char *e = strrchr(name, '/');
+	if (!e) return 1;
+	char *par = xstrndup(name, (size_t)(e - name));
+	const lfolder *p = find_folder(l, par);
+	int ok = !p || p->kind == LF_DIR || p->kind == LF_MH || p->kind == LF_NEW_MH;
+	if (!ok) seterr(l, "%s cannot hold subfolders", par);
+	free(par);
+	return ok;
+}
+
+/* The directories above path (root/A/B: root/A). */
+static int make_parents(local_t *l, const char *path)
+{
+	char *d = xstrdup(path);
+	char *e = strrchr(d, '/');
+	int rc = 0;
+	if (e && e > d) {
+		*e = '\0';
+		if (mkdirs(d) != 0) {
+			seterr(l, "cannot create %s: %s", d, strerror(errno));
+			rc = -1;
+		}
+	}
+	free(d);
+	return rc;
+}
+
+static int exists(const char *p)
+{
+	struct stat st;
+	return lstat(p, &st) == 0;
+}
+
+int local_create(local_t *l, const char *name)
+{
+	lfolder *f = find_folder(l, name);
+	if (f && f->kind < LF_NEW_MAILDIR) {
+		seterr(l, "%s already exists", name);
+		return -1;
+	}
+	if (l->new_kind < 0) {
+		seterr(l, "%s is a single mailbox: it cannot hold other folders", l->root ? l->root : "");
+		return -1;
+	}
+	if (!f && (!name_ok(l, name) || !parent_ok(l, name))) return -1;
+	int kind = f ? f->kind : l->new_kind;
+	char *p = f ? xstrdup(f->path) : folder_path(l, name);
+	int rc = -1;
+	if (exists(p)) {
+		seterr(l, "%s already exists", p);
+	} else if (l->sub_delim != '.' && make_parents(l, p) != 0) {
+		/* (error set) */
+	} else if (kind == LF_NEW_MBOX) {
+		int fd = open(p, O_WRONLY | O_CREAT | O_EXCL, 0600);
+		if (fd >= 0 && close(fd) == 0) rc = 0;
+		else seterr(l, "cannot create %s: %s", p, strerror(errno));
+	} else if (mkdir(p, 0700) != 0) {
+		seterr(l, "cannot create %s: %s", p, strerror(errno));
+	} else if (kind == LF_NEW_MH) {
+		/* .mh_sequences makes an empty directory an MH folder */
+		char *q = path_join(p, ".mh_sequences");
+		int fd = open(q, O_WRONLY | O_CREAT, 0600);
+		if (fd >= 0 && close(fd) == 0) rc = 0;
+		else seterr(l, "cannot create %s: %s", q, strerror(errno));
+		free(q);
+	} else {
+		static const char *const sub[] = {"cur", "new", "tmp"};
+		rc = 0;
+		for (int i = 0; i < 3 && rc == 0; i++) {
+			char *q = path_join(p, sub[i]);
+			if (mkdir(q, 0700) != 0) {
+				seterr(l, "cannot create %s: %s", q, strerror(errno));
+				rc = -1;
+			}
+			free(q);
+		}
+		if (rc == 0 && l->sub_delim == '.') {       /* the Maildir++ marker */
+			char *q = path_join(p, "maildirfolder");
+			int fd = open(q, O_WRONLY | O_CREAT, 0600);
+			if (fd >= 0) close(fd);
+			free(q);
+		}
+	}
+	free(p);
+	if (rc == 0) scan_folders(l);
+	return rc;
+}
+
+/* A folder that may be changed: not INBOX, not the POP3 inbox, there. */
+static lfolder *own_folder(local_t *l, const char *name, const char *what)
+{
+	lfolder *f = find_folder(l, name);
+	if (!f) {
+		seterr(l, "no folder %s", name);
+		return NULL;
+	}
+	if (!strcasecmp(name, "INBOX") || f->kind == LF_POP3 || !strcmp(f->path, l->root ? l->root : "")) {
+		seterr(l, "%s cannot be %s", name, what);
+		return NULL;
+	}
+	if (f->kind >= LF_NEW_MAILDIR) {
+		seterr(l, "%s does not exist yet", name);
+		return NULL;
+	}
+	if (l->sel >= 0 && &l->f[l->sel] == f) {
+		seterr(l, "%s is open", name);
+		return NULL;
+	}
+	return f;
+}
+
+/* Does folder name have subfolders (that exist)? */
+static int has_children(local_t *l, const lfolder *f)
+{
+	size_t n = strlen(f->name);
+	for (int i = 0; i < l->nf; i++)
+		if (&l->f[i] != f && l->f[i].kind < LF_NEW_MAILDIR && !strncmp(l->f[i].name, f->name, n) &&
+		    l->f[i].name[n] == f->delim)
+			return 1;
+	return 0;
+}
+
+int local_rename(local_t *l, const char *from, const char *to)
+{
+	lfolder *f = own_folder(l, from, "renamed");
+	if (!f || !name_ok(l, to) || !parent_ok(l, to)) return -1;
+	size_t n = strlen(from);
+	if (!strncmp(to, from, n) && to[n] == f->delim) {
+		seterr(l, "%s cannot go inside itself", from);
+		return -1;
+	}
+	lfolder *g = find_folder(l, to);
+	char *np = folder_path(l, to);
+	if ((g && g->kind < LF_NEW_MAILDIR) || exists(np)) {
+		seterr(l, "%s already exists", to);
+		free(np);
+		return -1;
+	}
+	int rc = -1;
+	if (l->sub_delim == '.' || make_parents(l, np) == 0) {
+		if (rename(f->path, np) == 0) rc = 0;
+		else seterr(l, "cannot rename %s: %s", f->path, strerror(errno));
+	}
+	free(np);
+	/* Maildir++ subfolders are directories of their own: ".A.x" -> ".B.x" */
+	for (int i = 0; rc == 0 && l->sub_delim == '.' && i < l->nf; i++) {
+		lfolder *c = &l->f[i];
+		if (c == f || c->kind >= LF_NEW_MAILDIR || strncmp(c->name, from, n) || c->name[n] != '.') continue;
+		buf_t nn = {0};
+		buf_printf(&nn, "%s%s", to, c->name + n);
+		char *cp = folder_path(l, nn.d);
+		if (rename(c->path, cp) != 0) {
+			seterr(l, "%s renamed, but not its subfolder %s: %s", from, c->name, strerror(errno));
+			rc = -1;
+		}
+		free(cp);
+		buf_free(&nn);
+	}
+	scan_folders(l);
+	return rc;
+}
+
+/* Remove the files (not the directories) in dir. */
+static int clear_files(local_t *l, const char *dir)
+{
+	DIR *d = opendir(dir);
+	if (!d) return errno == ENOENT ? 0 : -1;
+	struct dirent *e;
+	int rc = 0;
+	while ((e = readdir(d))) {
+		if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+		char *p = path_join(dir, e->d_name);
+		struct stat st;
+		if (lstat(p, &st) == 0 && !S_ISDIR(st.st_mode) && unlink(p) != 0) {
+			seterr(l, "cannot remove %s: %s", p, strerror(errno));
+			rc = -1;
+		}
+		free(p);
+	}
+	closedir(d);
+	return rc;
+}
+
+int local_delete_folder(local_t *l, const char *name)
+{
+	lfolder *f = own_folder(l, name, "deleted");
+	if (!f) return -1;
+	if (has_children(l, f)) {
+		seterr(l, "%s has subfolders: delete or move those first", name);
+		return -1;
+	}
+	int rc = 0;
+	if (f->kind == LF_MBOX) {
+		if (unlink(f->path) != 0) {
+			seterr(l, "cannot remove %s: %s", f->path, strerror(errno));
+			rc = -1;
+		}
+	} else {
+		/* a Maildir: the messages in cur, new, tmp, then the folder's own
+		 * files (index, uid list); an MH folder: its files. A directory
+		 * that is not part of the folder stays, and so does the folder. */
+		if (f->kind == LF_MAILDIR) {
+			static const char *const sub[] = {"cur", "new", "tmp"};
+			for (int i = 0; i < 3 && rc == 0; i++) {
+				char *q = path_join(f->path, sub[i]);
+				rc = clear_files(l, q);
+				if (rc == 0 && rmdir(q) != 0 && errno != ENOENT) {
+					seterr(l, "cannot remove %s: %s", q, strerror(errno));
+					rc = -1;
+				}
+				free(q);
+			}
+		}
+		if (rc == 0) rc = clear_files(l, f->path);
+		if (rc == 0 && rmdir(f->path) != 0) {
+			seterr(l, "the messages are deleted, but %s still holds other directories", f->path);
+			rc = -1;
+		}
+	}
+	scan_folders(l);
 	return rc;
 }

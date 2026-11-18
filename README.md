@@ -9,13 +9,13 @@ Windows `%APPDATA%\emsg` and `%LOCALAPPDATA%\emsg`) to `mcm`, and
 `emsg.conf` to `mcm.conf`; accounts and stored passwords keep working.
 
 ```
- Quit  Mail  Reply  Forward  Account  Config  F1=Help                        Thu 12 Nov 2026
+ Quit  Mail  Reply  Forward  Account  Config  F1=Menu                        Thu 12 Nov 2026
 ┌─ INBOX  3 msgs, 1 new ──────────────────────┐┌─ Message ──────────────────────────────┐
 │A Weekly deals        Newsletter 261112.23:01││From     Newsletter <news@shop.example> ▲
 │N Grüße aus Köln      Jürgen M…  261111.09:15││Subject  Weekly deals                   █
 │  plain old mail      alice@ex…  261111.00:00││                                        ░
 │                                             <>Hello,                                  ▼
-└─L─O──────── TAB=Folder|Accounts  PgUp/PgDn ─┘└─H─W─X─S─P─T─────────── Spc=PgDn B=PgUp ─┘
+└─L─O──────── TAB=Folder|Accounts  PgUp/PgDn ─┘└─H─W─X─S─P─T─K───────── Spc=PgDn B=PgUp ─┘
  test@localhost  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 ```
 
@@ -187,7 +187,7 @@ The help texts are plain text files in `help/`; edit them and run `make`:
 |---|---|
 | `help/cmdline.txt` | `mcm --help` / `mcm -h` |
 | `help/usage.txt` | after a wrong command line option |
-| `help/keys.txt` | the Help window, F1 or ? in mcm |
+| `help/keys.txt` | the Key list window: ? in mcm, or Help > Key list in the menu |
 | `help/editor.txt` | the key line at the bottom of the editor (one line) |
 
 Lines starting with `#` are comments, `@VERSION@` becomes the version number.
@@ -447,30 +447,67 @@ and `accounts_width` the Accounts window's share in the four-column layout.
 | X | toggle hex dump of the raw message |
 | S | save the message as a text file (see below) |
 | P | print the message (`lp`; on Windows Notepad prints it) |
-| T | attachments: list them, open or save one (see below) |
+| T | attachments: list them, open or save one (see below); an email with attachments has `@` in the list, and T on the message border is inverted |
+| K, or Enter / a number in the message window | the message's links and attachments: choose one, Enter opens the link in your browser, or opens / saves the attachment (see below) |
+| ↑ / ↓ | in the message window: to the previous / next link or attachment on the screen (underlined; the chosen one between `>` and `<`), else scroll a line; Enter opens the link or asks Open / Save for the attachment, Esc leaves it; a mouse click on one does the same |
 | L | filter the email list (see *Filter*) |
 | → | from the email list: to the message window |
 | F5 | refresh folder (also polled every 60 s) |
-| F1 / ? | help |
+| F1, F10 | the menu: every command in one window (see *Menu* below) |
+| ? | the key list (help) |
 | Q | quit |
 | Ctrl-Q, Ctrl-C | quit at once, from anywhere: the main screen, any dialog or the editor (see below) |
 | M R F | Mail / Reply / Forward: opens the editor |
 | C | Config: SMTP settings, account settings, switch account, wrap width, theme, delete all stored passwords |
 | Ctrl-← / Ctrl-→ | narrower / wider left column |
 | A | accounts: switch, add, name, full name, stored password |
-| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; click L, O or U on the list's or H, W, X, S, P, T on the message's bottom border; drag the column border to resize; use a scroll bar (every window that needs one, the help window too, and a horizontal one under an unwrapped message); the wheel scrolls the message, the lists and the help |
+| mouse | click an email or folder to select it, double-click to open it; click a menu bar item to run it; click L, O or U on the list's or H, W, X, S, P, T, K on the message's bottom border; drag the column border to resize; use a scroll bar (every window that needs one, the help window too, and a horizontal one under an unwrapped message); the wheel scrolls the message, the lists and the help |
 
 The bottom border of the list and the message window shows their paging keys.
 The list's bottom border starts with **L** (the filter, inverted while it is
 on), **O** (the selected messages, inverted while there are any) and, while
-the last copy or move can be undone, **U**. The message window's bottom border starts with **H W X S P T**: all headers,
-wrapped lines, hex dump, save, print, attachments; H, W and X are inverted while their mode
-is on, and a click on a letter works like the key. Pressing W also turns H and
+the last copy or move can be undone, **U**. An email with an attachment has **@** after its N/A flag in the list. The message window's bottom border starts with **H W X S P T K**: all headers,
+wrapped lines, hex dump, save, print, attachments, links; H, W and X are inverted while their mode
+is on, T while the open email has attachments, and a click on a letter works like the key. Pressing W also turns H and
 X off, back to the message text. With W on (the default, kept in `mcm.conf` as
 `message_wrap`) long lines are wrapped at the window's width, at most 76
 columns. With W off lines are shown whole: ← and → move the text sideways and
 a horizontal scroll bar on the bottom border shows where you are (it replaces
 the paging hint while it is there).
+
+**K** shows the links of the open message in a window. HTML and Markdown
+messages show their links as numbers (`tweede [2]`) and list them under
+**Links:** at the end; web addresses written out in the text
+(`https://...`) are added after them, with the next numbers. Choose one with
+↑/↓ or by typing its number (the number typed shows on the window's border),
+and **Enter** opens it in the desktop's browser (`xdg-open`; on Windows the
+default browser); `mailto:` links go to the desktop's mail program. In the
+message window, **Enter** opens the links window too, and typing a number
+opens it with that link chosen: `12` Enter opens link 12.
+
+The same window lists the message's attachments after the links, numbered on
+from the last link (`[3] Attachment: report.pdf  (application/pdf, 120 kB)`).
+Choosing one asks **Open** or **Save**, as with **T**: Open shows it in the
+desktop's program for that kind of file, Save puts it in `~/Downloads`.
+
+You can also choose a link in the text itself. Every link that can be
+chosen is underlined, as under a mouse pointer. In the message window
+**↓** goes to the next link while there is one on the screen, and scrolls a
+line when there is none; **↑** does the same upwards. So ↓ walks over the
+links on the screen and then reads on. The chosen link is shown between `>`
+and `<` in the highlight color (`tweede >[2]<`, `>https://example.org/pad<`),
+and the status line shows where it goes (`Link: https://...   Enter=Open
+Esc=Leave`). **Enter** opens it; without a chosen link on the screen Enter
+opens the links window. **Esc** leaves the link (a second Esc goes back to
+the email list), and a link scrolled off the screen is left too. Only `http`,
+`https`, `ftp` and `mailto` links are opened; a link in a mail never opens
+a local file or runs a program. The rest of a long message is loaded first.
+
+The `[Attachment: name  (type, size)]` lines in the text work the same way:
+they are underlined, ↑/↓ stop at them too, and the status line shows
+`Attachment: ...   Enter=Open/Save  Esc=Leave`. **Enter** asks Open or Save,
+as T does. With the mouse, a **click** on a link opens it, and a click on an
+attachment asks Open or Save.
 
 **S** saves the open message as a text file, as it is shown (with all headers
 when H is on), in `~/Downloads`, or in your home folder when there is no
@@ -540,6 +577,74 @@ mode 0600, its path is printed).
   restored, but nothing is saved.
 - While `:e` runs your own editor, Ctrl-C belongs to that editor.
 - On Windows, Ctrl-C is read as a key like Ctrl-Q (see [Windows](#windows)).
+
+### Menu
+
+**F1** (or **F10**, or a click on `F1=Menu` in the menu bar) opens the menu
+window under the menu bar, with every command in six columns:
+
+```
+┌─ Menu ───────────────────────────────────────────────────────────┐
+│ MCM      Account   Folders   Emaillist   Email    Help           │
+│ ───      ───────   ───────   ─────────   ─────    ────           │
+│ Config   Add       creaTe    fiLter      / find   about          │
+│ Quit     edIt      Delete    Other       Fwd      command line   │
+│          rEmove    moVe                  Header   key list       │
+│          select    reName                heX                     │
+│                    select                Mail                    │
+│                                          Print                   │
+│                                          Reply                   │
+│                                          Save                    │
+│                                          Wrap                    │
+├──────────────────────────────────────────────────────────────────┤
+│ :e         opens email with default editor                       │
+│ ^Q         global quit                                           │
+│ ^C         abort program                                         │
+│ <- ->      change active window                                  │
+│ Up Dn      scroll through active window                          │
+└─────────────────────────────────────────── Enter=Run  Esc=Close ─┘
+```
+
+← and → (or Tab) choose the column, ↑ and ↓ the item, and Enter runs it.
+The highlighted letter (the capital, or `/` for find) runs its item straight
+away from any column, so each letter is used only once. Items in lower case
+(select, and the Help column) have no letter: choose them with the arrows. In
+the Email and Emaillist columns the letters are the main screen's keys. A
+click on an item runs it, and a click outside the window closes it, as do
+Esc, F1 and F10. The menu opens again on the column you used last.
+
+Ctrl-M cannot open the menu: a terminal sends Ctrl-M and Enter as the same
+code, so mcm cannot tell them apart.
+
+- **MCM**: Config (C); Quit (Q).
+- **Account**:
+  - Add (A): a new account.
+  - edIt (I): the open account's name, full name and stored password.
+  - rEmove (E): forget another account, with its settings and stored passwords.
+    Its mail stays on the server or on disk, and the open account cannot be
+    removed.
+  - select: go to the accounts window.
+- **Folders**: these work on the folder the folders window points at.
+  - creaTe (T): asks for a name; `Parent/Name` makes a subfolder, using the
+    account's own separator, for example `.` on some IMAP servers. On a
+    server that keeps every folder under INBOX, the new folder goes there too.
+  - Delete (D): the folder and all messages in it, after you confirm (Cancel is
+    the default). A folder with subfolders is refused, and so is INBOX. When
+    the folder is open, INBOX is opened first.
+  - reName (N): a new name in the same place.
+  - moVe (V): puts the folder (with its subfolders) inside another folder or at
+    the top level.
+
+  IMAP uses CREATE, DELETE and RENAME; names are sent in modified UTF-7.
+  Local folders are made as the kind most folders there are (Maildir, mbox or
+  MH). Maildir++ subfolders (`.A.B`) are renamed along with their parent. In
+  a directory of folders, a Maildir or mbox file cannot hold subfolders.
+- **Emaillist**: fiLter (L), Other: the selected messages (O).
+- **Email**:
+  - / find: the `:/` search of the message window.
+  - Fwd (F), Header (H), heX (X), Mail (M), Print (P), Reply (R), Save (S),
+    Wrap (W).
+- **Help**: about; command line (the text of `mcm --help`); key list (also ? on the main screen).
 
 ### Commands in the message window
 
@@ -743,7 +848,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.979 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.989 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -1063,9 +1168,16 @@ cursor), newest first:
 │S--- Morgen de laatste dag 7%    KRSTBM             2026-11-15 19:31    12.3 kB│
 │SA-- Re: width                   Lucien van Lint    2026-11-15 15:24    18.9 kB│
 │S-F- Weekly deals                Newsletter         2026-11-12 23:01  255 bytes│
+│                                                                               │
+├───────────────────────────────────────────────────────────────────────────────┤
+│From:       KRSTBM <info@krstbm.example>                                       │
+│Message-ID: <20261115183102.4711@krstbm.example>                               │
 └─ C=Copy ─ M=Move ─ D=Delete ─ Enter=Unselect ─ Esc=Close ─────────────────────┘
  Flags: S=Seen A=Answered F=Flagged D=Deleted
 ```
+
+Below the list are the sender (name and email address) and the Message-ID of
+the message under the cursor ("(none)" when it has no Message-ID).
 
 The flags are the IMAP system flags: **S**een, **A**nswered, **F**lagged,
 **D**eleted. Sizes are in bytes, kB or MB (1 kB = 1000 bytes; the decimal sign
@@ -1141,7 +1253,9 @@ How it is done:
 | `src/msgwin.c` | the message window: wrapping, hex, `:` commands, save and print |
 | `src/attach.c` | attachments (T): open or save |
 | `src/pick.c` | selected messages (Enter, Shift-Enter) and their window (O): copy, move, delete |
-| `src/keys.c` | keys of the main screen, mouse clicks in the windows, the help window |
+| `src/keys.c` | keys of the main screen, mouse clicks in the windows, the help windows |
+| `src/menu.c` | the menu window (F1, F10) |
+| `src/fldops.c` | Folders > Create, Delete, Rename, Move |
 | `src/certs.c` | untrusted certificates and the always-accepted ones |
 | `src/account.c` | accounts, stored passwords, the Config menu, SMTP settings |
 | `src/send.c` | writing mail (new, reply, forward), sending it or keeping it as a draft |

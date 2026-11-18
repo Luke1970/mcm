@@ -64,7 +64,11 @@ int  store_delete(store_t *s, const uint32_t *uids, int n);
  * marked \Deleted (no UIDPLUS). Deleting for good cannot be undone. */
 int  store_undo_info(store_t *s, int *n, const char **src, const char **dst);
 int  store_undo(store_t *s);
-/* IMAP: create (and subscribe to) a folder; local folders: nothing to do. */
+/* Create (IMAP: and subscribe to) a folder, delete one with its messages,
+ * rename one (its subfolders go along). Local folders: see local.h; the
+ * open folder cannot be deleted or renamed there (select another first). */
 int  store_create(store_t *s, const char *name);
+int  store_delete_folder(store_t *s, const char *name);
+int  store_rename_folder(store_t *s, const char *from, const char *to);
 
 #endif

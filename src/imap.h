@@ -25,9 +25,12 @@ enum { FOLDER_SENT = 1, FOLDER_DRAFTS = 2, FOLDER_TRASH = 3 };
 typedef struct {
 	uint32_t seq, uid, size;
 	int      seen, answered, flagged, deleted;
+	int      att;      /* has an attachment (the @ in the list) */
 	time_t   date;
 	char    *from;     /* decoded display name or address */
 	char    *subject;  /* decoded */
+	char    *addr;     /* the sender's address (user@host), or NULL */
+	char    *msgid;    /* Message-ID, <...> included, or NULL */
 } msg_t;
 
 /* One node of a message's MIME structure (from BODYSTRUCTURE). */
@@ -87,6 +90,9 @@ int  imap_copy(imap_t *im, const uint32_t *uids, int n, const char *mbox);
 int  imap_move(imap_t *im, const uint32_t *uids, int n, const char *mbox);
 int  imap_expunge(imap_t *im, const uint32_t *uids, int n);
 int  imap_create(imap_t *im, const char *mbox);
+/* Delete a folder (and unsubscribe), rename one (subfolders go along). */
+int  imap_delete(imap_t *im, const char *mbox);
+int  imap_rename(imap_t *im, const char *from, const char *to);
 /* To undo the last imap_copy/imap_move: the uids of the copies (COPYUID,
  * RFC 4315; malloc'd), or, from a server without UIDPLUS, *uids NULL and
  * the UIDNEXT the mailbox had before (0: unknown); and its UIDVALIDITY. */
@@ -120,5 +126,6 @@ int imap_append(imap_t *im, const char *mbox, const char *flags, const char *dat
 
 /* Decode an IMAP modified UTF-7 mailbox name to UTF-8 (malloc'd). */
 char *mutf7_decode(const char *s);
+char *mutf7_encode(const char *s);
 
 #endif

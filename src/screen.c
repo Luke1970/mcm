@@ -210,11 +210,12 @@ static void draw_list(int x, int y, int w, int h, int focused)
 	else ensure_visible(&A.msel, &A.mtop, rows, nrows());
 	draw_scrollbar(COL_LIST, x + w - 1, y + 1, rows, nrows(), &A.mtop);
 
-	/* columns: flag | subject | from | date (YYMMDD.HH:MM) */
+	/* columns: flags (N A D or *, @ attachment, + selected) | subject | from |
+	 * date (YYMMDD.HH:MM) */
 	int datew = 12;
 	int fromw = inner >= 70 ? 22 : inner >= 48 ? 16 : 0;
-	int subjw = inner - 2 - 1 - datew - (fromw ? fromw + 1 : 0);
-	if (subjw < 4) { fromw = 0; subjw = inner - 3 - datew; }
+	int subjw = inner - 3 - 1 - datew - (fromw ? fromw + 1 : 0);
+	if (subjw < 4) { fromw = 0; subjw = inner - 4 - datew; }
 
 	for (int r = 0; r < rows; r++) {
 		int i = A.mtop + r;
@@ -231,16 +232,16 @@ static void draw_list(int x, int y, int w, int h, int focused)
 		attr_t a = (!m->seen ? A_BOLD : 0) | (sel && !focused ? A_REVERSE : 0);
 		int picked = pick_has(m->uid);         /* selected (Enter): + and the hotkey color */
 		if (picked && pair == CP_NORMAL) pair = CP_PICK;
-		char flag[3] = {m->deleted ? 'D' : !m->seen ? 'N' : m->answered ? 'A' : m->flagged ? '*' : ' ',
-		                picked ? '+' : ' ', 0};
+		char flag[4] = {m->deleted ? 'D' : !m->seen ? 'N' : m->answered ? 'A' : m->flagged ? '*' : ' ',
+		                m->att ? '@' : ' ', picked ? '+' : ' ', 0};
 		char date[32] = "";
 		if (m->date) {
 			struct tm tm;
 			localtime_r(&m->date, &tm);
 			strftime(date, sizeof date, "%y%m%d.%H:%M", &tm);
 		}
-		ui_puts(yy, xx, flag, 2, a, pair);
-		xx += 2;
+		ui_puts(yy, xx, flag, 3, a, pair);
+		xx += 3;
 		ui_puts(yy, xx, *m->subject ? m->subject : "(no subject)", subjw, a, pair);
 		xx += subjw;
 		ui_puts(yy, xx++, "", 1, a, pair);
@@ -397,8 +398,14 @@ static void draw_statusbar(void)
 	if (lw > COLS / 2) lw = COLS / 2;
 	ui_puts(y, 0, left, lw, A_BOLD, CP_MENU);
 
-	/* the message window has the focus: its vim-like ':' commands */
+	/* the message window has the focus: the active link's address, or its
+	 * vim-like ':' commands */
+	char lk[600];
+	int lkv = A.focus == COL_MSG && link_active_visible();
+	if (lkv && A.lk_att) snprintf(lk, sizeof lk, "Attachment: %s   Enter=Open/Save  Esc=Leave", A.lk_url);
+	else if (lkv) snprintf(lk, sizeof lk, "Link: %s   Enter=Open  Esc=Leave", A.lk_url);
 	const char *msg = *A.status ? A.status
+	                  : lkv ? lk
 	                  : A.focus == COL_MSG ? ":e Vim  :/text Search  :N Line  :w Save  :q Quit"
 	                  : A.focus == COL_LIST ? "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
 	                  : "Enter Open  F5 Refresh  Q/^Q Quit";

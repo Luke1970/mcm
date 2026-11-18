@@ -1,4 +1,4 @@
-# Help window shown by F1 or ? in mcm. Edit it, then run make (see cmdline.txt).
+# Key list shown by ? (or the menu's Help > Key list) in mcm. Edit it, then run make (see cmdline.txt).
 Mail Commander (mcm) @VERSION@ - console mail client
 
 Author: Lucien van Lint - mcm@sc00by.nl
@@ -14,7 +14,7 @@ and the window with the Email body (Message) will be shown. When expanding
 the width of the terminal, also the Folder list will appear and when 
 expanding more also the window with accounts will show.
 
- Quit  Mail  Reply  Forward  Account  Config  F1=Help 
+ Quit  Mail  Reply  Forward  Account  Config  F1=Menu 
 ┌─ INBOX  8152 msgs, 1028 new ─┐┌─ Message  56% ────────────────────────┐ 
 │  Morgen de laats 261115.19:31▲│From     KRSTBM <mail@krstbm.nl>       ▲ 
 │  Undelivered Mai 261115.17:58█│To       "L. van Lint" <lucien@sc00by.n█ 
@@ -37,7 +37,7 @@ expanding more also the window with accounts will show.
 │  💡 Is envy more 261115.13:07░│                                       ░ 
 │  Fwd: Beveiligin 261115.13:04░│Uw code                                ░ 
 │  Beveiligingsmel 261115.13:03▼│KERST7                                 ▼ 
-└─L─O──── TAB=Folder|Accounts ─┘└─H─W─X─S─P─T─◄█░░░░░░░░░░░░░░░░░░░░░░░►┘  
+└─L─O──── TAB=Folder|Accounts ─┘└─H─W─X─S─P─T─K─◄█░░░░░░░░░░░░░░░░░░░░░►┘  
 mcm@sc00by.nl  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 
 
@@ -75,7 +75,7 @@ Esc                  back to message list; in the list: leave the
                      filter, else clear the selection
 
 Selections available for Message window, 
-as shown on bottom of window H W X S P T:
+as shown on bottom of window H W X S P T K:
                      H  Toggle between all headers and short header info
                      W  wrap/unwrap long lines.
                      X  switch between hex dump and regular view.
@@ -84,6 +84,19 @@ as shown on bottom of window H W X S P T:
                      P  print the message (lp)
                      T  attachments: open one (in the desktop's
                         viewer) or save it in ~/Downloads
+                     K  links in the message (the [n] numbers and
+                        written-out web addresses): choose with
+                        Up/Down or type the number, Enter opens it
+                        in the browser. In the message window Enter
+                        or a number opens this list too (12 Enter:
+                        link 12). The attachments follow the links:
+                        Enter on one asks Open or Save, as T does
+Up / Down            in the message window: to the previous / next
+                     link or [Attachment: ...] on the screen (they
+                     are underlined, the chosen one shown as
+                     >link<), else scroll; Enter opens the link or
+                     asks Open/Save for the attachment, Esc leaves
+                     it. A mouse click on one does the same
 
 Selections available for list with emails:
                      L  Shows filter. Enter keyword, press enter.
@@ -107,7 +120,14 @@ C  Config            SMTP, account, wrap width, theme, passwords
 Ctrl-← / Ctrl-→      narrower / wider left column (or drag the border)
 F5                   refresh folder (new mail)
 Ctrl-L               redraw screen
-F1 / ?               this help
+F1 / F10             the menu: every command in six columns (MCM,
+                     Account, Folders, Emaillist, Email, Help);
+                     Left/Right column, Up/Down item, Enter runs it;
+                     a highlighted letter (or /) runs its item from
+                     any column; Esc closes the menu.
+                     Folders: creaTe, Delete, reName, moVe work on
+                     the folder the folders window points at
+?                    this key list
 Q                    quit
 Ctrl-Q / Ctrl-C      quit at once, from anywhere (also in dialogs and
                      the editor; text being written is saved in
@@ -118,14 +138,16 @@ Mouse                click the list's bottom border to filter
                      (Esc=Leave there ends it);
                      click an email or folder to select it, double
                      click to open it; click a menu bar item, L on the
-                     list border or H W X S P T on the message border;
+                     list border or H W X S P T K on the message border;
                      drag the column border;
                      scroll bars (every window that needs one, and
                      this help): ▲ ▼ line, track page, drag the thumb;
                      the wheel scrolls the message, the lists and this
                      help (a key brings a list back to its selection)
 
-Message list: N = new, A = answered, * = flagged, D = deleted
+Message list: N = new, A = answered, * = flagged, D = deleted,
+@ = has an attachment (T on the message border is inverted then),
++ = selected
 
 Author: Lucien van Lint 
 email:  mcm@sc00by.nl

@@ -72,7 +72,7 @@ WHERE - the kinds of mail mcm reads:
   A local path starts with '/', '~' or '.', or with file://, maildir: or mbox:.
   In local folders and POP3 accounts, Sent and Drafts are made when first used.
 
-Keys (F1 in mcm shows them all):
+Keys (? in mcm shows them all, F1 opens the menu):
   Tab           left window: emails, folders, accounts      Enter  open
   Left / Right  move between the windows
   PgUp/PgDn     page the list       Space / Shift-, Ctrl-, Alt-Space or

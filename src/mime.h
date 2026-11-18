@@ -40,6 +40,11 @@ typedef struct {
 } mime_att;
 int  mime_attachments(const char *raw, size_t len, mime_att **out);
 void mime_att_free(mime_att *a, int n);
+/* Does the start of a raw message (the header, and as much of the body as
+ * there is) show an attachment? A part marked attachment, or one that is
+ * not text and not a picture of the HTML text (Content-ID) counts. With
+ * only the header: multipart/mixed counts. */
+int  mime_has_attachment(const char *raw, size_t len);
 
 /* Undo a Content-Transfer-Encoding (base64, quoted-printable, else as is). */
 char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outlen);
@@ -68,5 +73,6 @@ time_t mime_parse_date(const char *s);
 
 /* Display form of a From: header value: the decoded name, else the address. */
 char *mime_addr_display(const char *v);
+char *mime_addr_email(const char *v);
 
 #endif

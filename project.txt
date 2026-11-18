@@ -273,7 +273,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.979 Quit Mail Reply Forward Account Config F1=Help  date time
+  mcm 0.989 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -299,7 +299,7 @@ Local (src/local.c):
   (Windows win_run), SIGINT ignored meanwhile; also used by the editor's :e.
 - Status line: "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
   with the focus on the email list, "Enter Open  F5 Refresh  Q/^Q Quit" on
-  the folders and accounts (no F1, Tab, column or L/O hint: F1=Help is in
+  the folders and accounts (no F1, Tab, column or L/O hint: F1=Menu is in
   the menu bar, L, O and U on the list's border). With the focus on the
   message window it shows the ':' commands instead:
   ":e Vim  :/text Search  :N Line  :w Save  :q Quit".
@@ -316,6 +316,10 @@ Local (src/local.c):
   undo (the filter bar starts at x+8).
 - O: pick_window() covers rows 1..LINES-2: Flag (SAFD) Subject From
   Date (%Y-%m-%d %H:%M) Size (bytes / kB / MB, 1000-based), newest first.
+  Under the list (0.980), after a ├─┤ line: "From: Name <addr>" and
+  "Message-ID:" of the message under the cursor. msg_t carries addr and
+  msgid (NULL when absent): IMAP from the ENVELOPE (from's mailbox@host, the
+  10th field), local from the From: (mime_addr_email) and Message-ID headers.
   C copy / M move (ui_list_dialog of the account's folders, full paths,
   the open one left out), D delete = move to the trash folder (\Trash
   special-use, else Deleted Items / Trash / Deleted / Deleted Messages;
@@ -361,9 +365,9 @@ Local (src/local.c):
   the right edge, so it still fits).
 - List bottom border: L at its left (bold, inverted while a filter is
   typed or applied; a click = L), the filter bar right of it.
-- Message window bottom border: H W X S P T at its left (bold; H W X
+- Message window bottom border: H W X S P T K at its left (bold; H W X
   inverted while on: H all headers, W wrapped lines, X hex dump; S save,
-  P print, T attachments; a click = the key). W also switches H and X off. Then,
+  P print, T attachments, K links; a click = the key). W also switches H and X off. Then,
   with W off and a line wider than the window, a horizontal scroll bar
   (draw_hscrollbar, sbs[SB_HMSG]: arrows 8 columns, track a page, drag the
   thumb) up to the corner; otherwise the paging hint on the right.
@@ -372,9 +376,63 @@ Local (src/local.c):
   first column shown, A.maxw the widest line. Toggling W keeps the text at
   the top of the window in view. Left/Right in e move the text 8 columns
   (HSTEP); Left at column 0 goes to the window on the left.
-- Help window (F1): a scroll bar in its right border when it does not fit
+- Key list window (?, Help > Key list): a scroll bar in its right border when it does not fit
   (arrows, track, drag the thumb); the wheel scrolls it; a click elsewhere
   closes it.
+- Menu window (menu.c, 0.985): F1 or F10 (Ctrl-M is not possible: the
+  terminal sends it as CR, the same as Enter). One window at row 1,
+  column 0, with six columns MCM, Account, Folders, Emaillist, Email,
+  Help: the title (CP_HIGHLIGHT when it is the open column) and a line
+  under it, then the items, alphabetical (case aside), with a hot letter
+  (CP_HOTKEY, CP_HOTKEY_HL on the bar; written as the capital, 0.986:
+  creaTe moVe reName edIt rEmove fiLter heX, '/' for "/ find"). A
+  letter runs its item from any column, so each is used once: C Q A I
+  E T D V N L O / F H X M P R S W. Lower-case items (select, the Help
+  column) have none (hot -1). Under a ├─┤ line are five notes (:e,
+  ^Q, ^C, <- ->, Up Dn); they are left out when LINES is too small. On a
+  narrow screen the columns start further right, so that the open one
+  fits. Left/Right/Tab = column, Up/Down = item (both wrap around),
+  Enter = run, Esc/F1/F10 = close; a click on an item runs
+  it, a click outside closes the window. The open column and item are
+  kept (static) for the next time. An item runs either an action (DO_*)
+  or handle_key(its key), after the window is closed and the screen
+  drawn again.
+- fldops.c (0.985), the folder that A.fsel points at:
+  - Create: ui_input_dialog. The name is typed with the folder separator
+    (delim(): INBOX's, else the first one). When every IMAP folder is
+    under INBOX, "INBOX<d>" is put in front. IMAP and '.'
+    (Maildir++) names are converted with mutf7_encode (imap.c).
+  - Delete: ui_choice_dialog, Cancel the default; refused for INBOX and
+    for a folder with subfolders. When it is open, INBOX is opened first
+    (leave_open).
+  - Rename: a new last part. Move: a list of the possible parents,
+    "(top level)" first. Both use store_rename_folder; a folder that was
+    open is opened again under its new name. After each one,
+    folders_reload(sel) (folder.c; pick.c's create_trash uses it too)
+    reads the list again.
+  - store_create / store_delete_folder / store_rename_folder:
+    - IMAP: CREATE+SUBSCRIBE, DELETE+UNSUBSCRIBE,
+      RENAME+UNSUBSCRIBE/SUBSCRIBE.
+    - Local (local.c): local_create makes l->new_kind (the kind most
+      folders there are) at folder_path(), '.' => root/.A.B, else
+      root/A/B (parent directories are made). MH gets an empty
+      .mh_sequences, Maildir++ gets "maildirfolder". Listed but not yet
+      made (LF_NEW_*) folders are made at their path.
+    - local_rename: rename(); for Maildir++ the ".A.x" subfolders are
+      renamed too.
+    - local_delete_folder: mbox unlink; Maildir: the files in cur, new
+      and tmp, those directories, the folder's own files, then rmdir. A
+      directory that is not part of the folder makes it fail ("still
+      holds other directories"). MH: its files, then rmdir.
+    - Local refuses INBOX, the root, the POP3 inbox, the open folder and
+      names the scan would not find (empty parts, a leading '.', all
+      digits, a backslash). In a directory of folders, a Maildir or mbox
+      cannot be a parent (parent_ok).
+    - Both delete and rename clear the undo (U).
+- Account > Remove (account.c account_remove): a list of the other
+  accounts, then ui_choice_dialog (Cancel the default). The entry is
+  taken out of accts[] (ac moves along), its encrypted passwords are
+  freed, and config_save writes the file without it.
 - Four windows: a Accounts, f Folders, l the email list, e the message.
     up to 150 columns: two windows; e always on the right, on the left l, f
       or a. Tab: l -> f -> a -> l; Shift-Tab the other way.
@@ -404,9 +462,23 @@ Local (src/local.c):
   Ctrl-Left / Ctrl-Right or by dragging a border with the mouse; they are
   saved as percentages so they fit after a resize.
 - Bottom line: account, short key help, and status messages.
-- Email list rows: flag (N new, A answered, * flagged, D deleted), subject,
+- Email list rows: flags in 3 columns (N new, A answered, * flagged, D
+  deleted; @ attachment, 0.987; + selected), subject,
   sender (display name, shortened with ...), date as YYMMDD.HH:MM. Newest
   at the top.
+- Attachment hint (0.987): msg_t.att.
+  - IMAP: the list FETCH also asks BODYSTRUCTURE; part_has_att (imap.c)
+    looks for a part marked attachment, or a leaf that is not text/plain,
+    text/html, markdown or message/rfc822. Inside multipart/related only a
+    marked part counts, so pictures of an HTML text do not.
+  - Local: mime_has_attachment (mime.c) reads the header blocks in the
+    first HDR_MAX bytes (Maildir/MH: load_header's read; mbox: a peek
+    buffer in scan_mbox). A part counts when it is marked attachment, or
+    is not text and has no Content-ID or inline disposition. POP3 has only
+    the header (TOP 0): multipart/mixed counts.
+  - The message window's T is inverted (open_has_att in msgwin.c, cached
+    per uid) when mv_attachments finds any, or else when the list's @
+    says so.
 - Folder list: tree, indented per level; folders that cannot be selected
   are shown but not opened.
 - The message window shows From, To, Cc, Date and Subject, an empty line,
@@ -449,6 +521,58 @@ Main screen:
   S                    save the message (as shown) in ~/Downloads or ~:
                        mcm--FROM--YYYY-MM-DD--SUBJECT.txt, mode 0600,
                        never overwrites (-2, -3, ...); rest fetched first
+  K                    links and (0.988) attachments: after the links,
+                       numbered on from the highest link number, come
+                       the attachments ("[n] Attachment: name  (type,
+                       size)", att_collect in attach.c keeps att_list's
+                       result until att_release); choosing one runs
+                       att_choose: the Open / Save dialog of T
+                       (att_open_or_save).
+                       Links (0.981, links_window in msgwin.c; also Enter
+                       and 1-9 in the message window): the whole message
+                       loaded (load_whole_message), then collect_links:
+                       the "Links:" lists of rendered HTML/Markdown
+                       ("[n] URL" lines after a "Links:" line), then bare
+                       http(s):// URLs in the text (unbalanced ")" and
+                       trailing .,;:!?]* dropped), deduplicated, numbered
+                       after the largest n. ui_list_dialog_num: Up/Down,
+                       digits select the item with that number (shown on
+                       the border; a number no item has restarts at the
+                       digit), Enter opens: only http https ftp mailto,
+                       no control characters, spaces as %20, then
+                       open_with_viewer (attach.c: xdg-open via a
+                       double fork, Windows ShellExecute).
+  Up / Down            (message window, 0.984; Tab switches windows as
+                       before) link_step: the links of the rendered text
+                       (collect_stops, cached in stops until the next
+                       mv_render): the [n] marks whose n is in a "Links:"
+                       list (not in the lists themselves) and bare http(s)
+                       URLs (url_at), in text order. Down: the first link
+                       after the active one (none active or off screen:
+                       the first from the top line) when it starts on the
+                       screen, else scroll a line; Up the same backwards.
+                       A link scrolled off is cleared. All links drawn
+                       with A_UNDERLINE (draw_text_line keeps the column
+                       of each byte); the active one: A.lk_off/lk_len
+                       (bytes in mv.text), lk_url, lk_text (checked after
+                       a re-render, else cleared, e.g. H), between > and <
+                       (index_lines gives each a column; A.reindex
+                       re-wraps), CP_HIGHLIGHT bold underlined; a < on
+                       spaces dropped by wrapping goes at the line end.
+                       Status line "Link: URL Enter=Open Esc=Leave" while
+                       it is on screen (screen.c). Enter: link_open_active,
+                       else links_window; Esc clears it, then leaves.
+                       0.989: "[Attachment: ...]" lines (from the start
+                       of a line to its ']') are stops too: stop_t.att =
+                       k+1 for the k-th, A.lk_att, lk_url = "name  (type,
+                       size)"; status "Attachment: ... Enter=Open/Save";
+                       Enter calls att_open_shown (attach.c: att_list's
+                       k-th one if the name agrees, else the first of
+                       that name), the Open / Save dialog of T. Mouse:
+                       draw_text_line records where each underlined stop
+                       is on the screen (hits[]); a click there
+                       (click_window -> msg_click) makes it the active
+                       one and opens it.
   T                    attachments: list (ui_list_dialog), then Open or
                        Save. IMAP: from BODYSTRUCTURE (mv_attachments,
                        the parts shown as [Attachment]), only the chosen
@@ -473,7 +597,8 @@ Main screen:
   L                    filter the email list (see 15a)
   F5                   refresh (new mail)
   Ctrl-L               redraw
-  F1 / ?               help window (help/keys.txt)
+  F1 / F10             the menu window (menu.c, 0.985)
+  ?                    key list window (help/keys.txt)
   Q                    quit
   Ctrl-Q / Ctrl-C      quit at once, from anywhere
 

@@ -18,7 +18,6 @@ static void att_filename(buf_t *b, const char *name, char *ext, size_t extn);
 static void att_free(att_t *a, int n);
 static int att_list(att_t **out);
 static int att_write(att_t *a, const char *dir, buf_t *path);
-static int open_with_viewer(const char *path);
 
 /* ------------------------------------------------------------------ */
 /* Attachments (T)                                                      */
@@ -207,8 +206,9 @@ static int att_write(att_t *a, const char *dir, buf_t *path)
 	return 0;
 }
 
-/* Show a file with the program the desktop uses for it (not waited for). */
-static int open_with_viewer(const char *path)
+/* Show a file (or a URL) with the program the desktop uses for it (not
+ * waited for). */
+int open_with_viewer(const char *path)
 {
 #ifdef _WIN32
 	HINSTANCE h = ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
@@ -238,6 +238,43 @@ static int open_with_viewer(const char *path)
 #endif
 }
 
+/* Open (in the desktop's viewer) or save (in ~/Downloads) attachment a,
+ * after asking which; item describes it. 0 = done, 1 = cancelled. */
+static int att_open_or_save(att_t *a, const char *item)
+{
+	const char *lines[] = {item};
+	static const ui_menuitem btn[] = {{"Open", 0, 'o'}, {"Save", 0, 's'}, {"Cancel", 0, 'c'}};
+	int c = ui_choice_dialog("Attachment", lines, 1, btn, 3, 0, 0, draw_bg);
+	if (c != 0 && c != 1) return 1;
+	char dir[1024];
+	buf_t path = {0};
+	if (c == 0) {                                    /* Open */
+		if (att_runnable(a->name))
+			set_status("%s can run code: mcm does not open such files, use Save", a->name);
+		else if (att_dir(dir, sizeof dir) != 0)
+			set_status("%s", "Error: no folder for opened attachments");
+		else if (att_write(a, dir, &path) == 0) {
+			if (open_with_viewer(path.d) != 0) set_status("Error: cannot open %s", path.d);
+			else set_status("Opened %s", a->name);
+		}
+	} else {                                         /* Save */
+		if (downloads_dir(dir, sizeof dir) != 0) set_status("%s", "Error: no home folder (HOME)");
+		else if (att_write(a, dir, &path) == 0) set_status("Saved %s", path.d);
+	}
+	buf_free(&path);
+	return 0;
+}
+
+/* "name  (type, size)" */
+static char *att_item(const att_t *a)
+{
+	char hs[32];
+	mime_human_size(hs, sizeof hs, a->size);
+	buf_t b = {0};
+	buf_printf(&b, "%s  (%s, %s)", a->name, a->type, hs);
+	return buf_steal(&b);
+}
+
 /* T: list the open message's attachments; the chosen one is opened (in the
  * desktop's viewer) or saved in ~/Downloads. */
 void attachments(void)
@@ -256,45 +293,63 @@ void attachments(void)
 		return;
 	}
 	char **items = xcalloc((size_t)n, sizeof *items);
-	for (int i = 0; i < n; i++) {
-		char hs[32];
-		mime_human_size(hs, sizeof hs, a[i].size);
-		buf_t b = {0};
-		buf_printf(&b, "%s  (%s, %s)", a[i].name, a[i].type, hs);
-		items[i] = buf_steal(&b);
-	}
+	for (int i = 0; i < n; i++) items[i] = att_item(&a[i]);
 	int sel = 0;
 	for (;;) {
 		sel = ui_list_dialog("Attachments", (const char *const *)items, n, sel,
 		                     "Enter: open or save   Esc: close", draw_bg);
-		if (sel < 0) break;
-		const char *lines[] = {items[sel]};
-		static const ui_menuitem btn[] = {{"Open", 0, 'o'}, {"Save", 0, 's'}, {"Cancel", 0, 'c'}};
-		int c = ui_choice_dialog("Attachment", lines, 1, btn, 3, 0, 0, draw_bg);
-		if (c != 0 && c != 1) continue;
-		char dir[1024];
-		buf_t path = {0};
-		if (c == 0) {                                    /* Open */
-			if (att_runnable(a[sel].name)) {
-				set_status("%s can run code: mcm does not open such files, use Save", a[sel].name);
-				break;
-			}
-			if (att_dir(dir, sizeof dir) != 0) {
-				set_status("%s", "Error: no folder for opened attachments");
-				break;
-			}
-			if (att_write(&a[sel], dir, &path) == 0) {
-				if (open_with_viewer(path.d) != 0) set_status("Error: cannot open %s", path.d);
-				else set_status("Opened %s", a[sel].name);
-			}
-		} else {                                         /* Save */
-			if (downloads_dir(dir, sizeof dir) != 0) set_status("%s", "Error: no home folder (HOME)");
-			else if (att_write(&a[sel], dir, &path) == 0) set_status("Saved %s", path.d);
-		}
-		buf_free(&path);
-		break;
+		if (sel < 0 || att_open_or_save(&a[sel], items[sel]) == 0) break;
 	}
 	for (int i = 0; i < n; i++) free(items[i]);
 	free(items);
 	att_free(a, n);
+}
+
+/* For the links window (K): the open message's attachments, kept until
+ * att_release. */
+static att_t *kept;
+static int    nkept;
+
+int att_collect(char ***items)
+{
+	*items = NULL;
+	att_release();
+	int n = att_list(&kept);
+	if (n <= 0) {
+		att_free(kept, 0);
+		kept = NULL;
+		return 0;
+	}
+	nkept = n;
+	*items = xcalloc((size_t)n, sizeof **items);
+	for (int i = 0; i < n; i++) (*items)[i] = att_item(&kept[i]);
+	return n;
+}
+
+void att_choose(int i, const char *item)
+{
+	if (i >= 0 && i < nkept) att_open_or_save(&kept[i], item);
+}
+
+void att_release(void)
+{
+	att_free(kept, nkept);
+	kept = NULL;
+	nkept = 0;
+}
+
+void att_open_shown(int k, const char *name, const char *item)
+{
+	char **items;
+	int n = att_collect(&items);
+	/* the k-th one, if the name agrees; else the first of that name */
+	int i = k < n && !strcmp(kept[k].name, name) ? k : -1;
+	for (int j = 0; i < 0 && j < n; j++)
+		if (!strcmp(kept[j].name, name)) i = j;
+	if (i < 0 && k < n) i = k;
+	if (i >= 0) att_choose(i, item);
+	else if (!*A.status) set_status("%s", "Error: the attachment was not found");
+	for (int j = 0; j < n; j++) free(items[j]);
+	free(items);
+	att_release();
 }

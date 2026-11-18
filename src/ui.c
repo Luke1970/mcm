@@ -702,10 +702,26 @@ int ui_choice_dialog(const char *title, const char *const *lines, int n,
 	}
 }
 
+static int list_dialog(const char *title, const char *const *items, const int *nums, int n, int def,
+                       int key, const char *hint, ui_bg_fn bg);
+
 int ui_list_dialog(const char *title, const char *const *items, int n, int def, const char *hint,
                    ui_bg_fn bg)
 {
+	return list_dialog(title, items, NULL, n, def, 0, hint, bg);
+}
+
+int ui_list_dialog_num(const char *title, const char *const *items, const int *nums, int n,
+                       int key, const char *hint, ui_bg_fn bg)
+{
+	return list_dialog(title, items, nums, n, 0, key, hint, bg);
+}
+
+static int list_dialog(const char *title, const char *const *items, const int *nums, int n, int def,
+                       int key, const char *hint, ui_bg_fn bg)
+{
 	int sel = def >= 0 && def < n ? def : 0, top = 0;
+	char num[8] = "";                  /* the number being typed */
 	for (;;) {
 		int w = (int)strlen(hint ? hint : "") + 6;
 		for (int i = 0; i < n; i++)
@@ -726,10 +742,45 @@ int ui_list_dialog(const char *title, const char *const *items, int n, int def, 
 			ui_puts(y0 + 2 + r, x0 + 3, line, w - 6, 0, i == sel ? CP_HIGHLIGHT : CP_MENU);
 		}
 		if (hint) ui_puts(y0 + h - 2, x0 + 3, hint, w - 6, A_DIM, CP_MENU);
+		if (*num) {
+			char t[32];
+			snprintf(t, sizeof t, " %s_ ", num);
+			ui_puts(y0 + h - 1, x0 + w - 3 - (int)strlen(t), t, (int)strlen(t), A_BOLD, CP_MENU);
+		}
 		refresh();
 
-		timeout(-1);
-		int ch = ui_getch();
+		int ch = key;
+		key = 0;
+		if (!ch) {
+			timeout(-1);
+			ch = ui_getch();
+		}
+		if (nums && ch >= '0' && ch <= '9') {
+			/* digits: the item with that number; a number no item has
+			 * starts again at this digit */
+			size_t l = strlen(num);
+			if (l + 1 < sizeof num) {
+				num[l] = (char)ch;
+				num[l + 1] = '\0';
+			}
+			for (int pass = 0; pass < 2; pass++) {
+				int want = atoi(num), hit = -1;
+				for (int i = 0; i < n && hit < 0; i++)
+					if (nums[i] == want) hit = i;
+				if (hit >= 0) {
+					sel = hit;
+					break;
+				}
+				num[0] = (char)ch;
+				num[1] = '\0';
+			}
+			continue;
+		}
+		if (nums && (ch == KEY_BACKSPACE || ch == 127 || ch == 8) && *num) {
+			num[strlen(num) - 1] = '\0';
+			continue;
+		}
+		num[0] = '\0';
 		switch (ch) {
 		case KEY_UP: if (sel > 0) sel--; break;
 		case KEY_DOWN: case '\t': if (sel < n - 1) sel++; break;

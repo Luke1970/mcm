@@ -199,6 +199,8 @@ int store_fetch_set(store_t *s, const uint32_t *seqs, int n, msg_t **out, int *n
 		for (int x = j - i + 1; x < k; x++) {   /* not expected */
 			free(part[x].from);
 			free(part[x].subject);
+			free(part[x].addr);
+			free(part[x].msgid);
 		}
 		free(part);
 		i = j + 1;
@@ -424,7 +426,24 @@ int store_undo(store_t *s)
 int store_create(store_t *s, const char *name)
 {
 	CLR(s);
-	return s->im ? imap_create(s->im, name) : 0;
+	if (s->im) return imap_create(s->im, name);
+	return s->loc ? local_create(s->loc, name) : 0;
+}
+
+int store_delete_folder(store_t *s, const char *name)
+{
+	CLR(s);
+	undo_clear(s);                     /* the undo may point at it */
+	if (s->im) return imap_delete(s->im, name);
+	return local_delete_folder(s->loc, name);
+}
+
+int store_rename_folder(store_t *s, const char *from, const char *to)
+{
+	CLR(s);
+	undo_clear(s);
+	if (s->im) return imap_rename(s->im, from, to);
+	return local_rename(s->loc, from, to);
 }
 
 /* Lower-case wide copy of UTF-8 text (malloc'd). */

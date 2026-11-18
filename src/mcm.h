@@ -51,7 +51,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.979"
+#define MCM_VERSION   "0.989"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -67,7 +67,7 @@ enum { COL_FOLDERS, COL_LIST, COL_MSG, COL_ACCTS };
 #define WRAP_VIEW 76
 #define HSTEP 8
 /* The letters on the message window's bottom border (keys, and clicks). */
-#define HWXSP "HWXSPT"
+#define HWXSP "HWXSPTK"
 
 typedef struct { uint32_t off, len; } line_t;   /* one display line of the message text */
 
@@ -180,6 +180,12 @@ typedef struct {
 	int       hls;                   /* its matches are highlighted (until :noh) */
 	int       hwx_y, hwx_x;          /* H W X on the message's bottom border (x 0: not shown) */
 	int       pending_load;
+	/* the active link (Tab / Shift-Tab): bytes [lk_off, lk_off + lk_len)
+	 * of mv.text, shown between > and <; lk_url NULL = none */
+	size_t    lk_off, lk_len;
+	char     *lk_url, *lk_text;
+	int       lk_att;   /* 0, or k+1: it is the k-th attachment (lk_url its text) */
+	int       reindex;               /* the lines must be wrapped again (markers moved) */
 
 	/* background work requested by the last draw */
 	int       need_list, need_more, need_hex, work_failed;
@@ -224,6 +230,7 @@ int work_pending(void);
 void do_work(void);
 void filter_edit(void);
 void reopen_folder(void);
+int folders_reload(const char *sel);
 int nrows(void);
 msg_t *msg_load(int i);
 
@@ -247,6 +254,13 @@ FILE *new_file(buf_t *path, const char *ext);
 void save_message(int print);
 void handle_key_wrap(void);
 int msg_colon(void);
+int msg_colon_with(const char *init);
+void links_window(int key);
+void link_step(int dir);
+int link_active_visible(void);
+int link_open_active(void);
+void link_clear(void);
+int msg_click(int x, int y);
 
 /* screen.c */
 void clamp_top(int *top, int rows, int n);
@@ -268,12 +282,33 @@ void login_bg(void);
 /* attach.c */
 void att_cleanup(void);
 void attachments(void);
+int open_with_viewer(const char *path);
+/* The links window's share: the open message's attachments as list items
+ * ("name  (type, size)", malloc'd; returns how many), Open/Save for one of
+ * them, and freeing them again. */
+int att_collect(char ***items);
+void att_choose(int i, const char *item);
+void att_release(void);
+/* The k-th "[Attachment: ...]" of the text (name: its file name, item: the
+ * text shown): Open or Save. */
+void att_open_shown(int k, const char *name, const char *item);
 
 /* keys.c */
 void show_help(void);
+void show_cmdline_help(void);
+void show_about(void);
 void focus_to(int col);
 void click_window(const cols_t *cl, int x, int y);
 int handle_key(int ch);
+
+/* menu.c: F1, F10 - the menu window; 0 = quit */
+int menu_run(void);
+
+/* fldops.c: Folders > Create, Delete, Rename, Move */
+void folder_create(void);
+void folder_delete(void);
+void folder_rename(void);
+void folder_move(void);
 
 /* certs.c */
 int cert_check(const net_certinfo *ci, void *ctx);
@@ -291,6 +326,8 @@ int pick_account(const char *title, int def, int mark, ui_bg_fn bg);
 void load_theme(theme_t *t, char *msg, size_t n);
 void config_menu(void);
 void account_menu(void);
+void account_edit(void);
+void account_remove(void);
 int smtp_settings(const char *err, ui_bg_fn bg);
 
 /* send.c */

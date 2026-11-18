@@ -576,6 +576,52 @@ char *mutf7_decode(const char *s)
 	return buf_steal(&b);
 }
 
+/* UTF-8 -> modified UTF-7 (RFC 3501 5.1.3), for folder names typed here. */
+char *mutf7_encode(const char *s)
+{
+	static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+,";
+	buf_t b = {0};
+	const unsigned char *p = (const unsigned char *)s;
+	while (*p) {
+		if (*p >= 0x20 && *p < 0x7F) {
+			if (*p == '&') buf_adds(&b, "&-");
+			else buf_addc(&b, (char)*p);
+			p++;
+			continue;
+		}
+		buf_addc(&b, '&');
+		uint32_t bits = 0;
+		int nbits = 0;
+		while (*p && !(*p >= 0x20 && *p < 0x7F)) {
+			/* one UTF-8 character (a bad byte counts as itself) */
+			uint32_t cp = *p++;
+			int more = cp >= 0xF0 ? 3 : cp >= 0xE0 ? 2 : cp >= 0xC0 ? 1 : 0;
+			if (more) cp &= 0x3F >> more;
+			for (; more && (*p & 0xC0) == 0x80; more--) cp = cp << 6 | (*p++ & 0x3F);
+			uint32_t u[2];
+			int nu = 0;
+			if (cp >= 0x10000 && cp <= 0x10FFFF) {
+				u[nu++] = 0xD800 + ((cp - 0x10000) >> 10);
+				u[nu++] = 0xDC00 + ((cp - 0x10000) & 0x3FF);
+			} else {
+				u[nu++] = cp & 0xFFFF;
+			}
+			for (int i = 0; i < nu; i++) {
+				bits = bits << 16 | u[i];
+				nbits += 16;
+				while (nbits >= 6) {
+					nbits -= 6;
+					buf_addc(&b, b64[(bits >> nbits) & 0x3F]);
+				}
+				bits &= (1u << nbits) - 1;
+			}
+		}
+		if (nbits) buf_addc(&b, b64[(bits << (6 - nbits)) & 0x3F]);
+		buf_addc(&b, '-');
+	}
+	return buf_steal(&b);
+}
+
 static int is_inbox(const folder_t *f)
 {
 	size_t n = strlen(f->name);
@@ -677,6 +723,24 @@ static char *addr_display(const node_t *addrs)
 	return buf_steal(&b);
 }
 
+/* The first address of an ENVELOPE address list: mailbox@host, or NULL. */
+static char *addr_email(const node_t *addrs)
+{
+	if (!addrs || addrs->t != N_LIST || !addrs->kid || addrs->kid->t != N_LIST)
+		return NULL;
+	const node_t *a = addrs->kid->kid;   /* (name adl mailbox host) */
+	const node_t *mbox = a && a->next ? a->next->next : NULL;
+	const node_t *host = mbox ? mbox->next : NULL;
+	if (!*nstr(mbox)) return NULL;
+	buf_t b = {0};
+	buf_adds(&b, nstr(mbox));
+	if (*nstr(host)) {
+		buf_addc(&b, '@');
+		buf_adds(&b, nstr(host));
+	}
+	return buf_steal(&b);
+}
+
 /* Index of seq in the ascending list (or seq - from when there is none), -1 if absent. */
 static long seq_index(const uint32_t *seqs, uint32_t count, uint32_t from, uint32_t seq)
 {
@@ -690,13 +754,33 @@ static long seq_index(const uint32_t *seqs, uint32_t count, uint32_t from, uint3
 	return lo < count && seqs[lo] == seq ? (long)lo : -1;
 }
 
+static void bs_parse(const node_t *list, const char *sec, mpart_t *p, int depth);
+
+/* An attachment in the structure: a part marked so, or one that is not
+ * shown as text (inside multipart/related: only when marked). */
+static int part_has_att(const mpart_t *p, int related)
+{
+	if (!strcmp(p->type, "multipart")) {
+		int rel = related || !strcmp(p->subtype, "related");
+		for (int i = 0; i < p->nkids; i++)
+			if (part_has_att(&p->kids[i], rel)) return 1;
+		return 0;
+	}
+	if (p->attachment) return 1;
+	if (related) return 0;
+	if (!strcmp(p->type, "text") && (!strcmp(p->subtype, "plain") || !strcmp(p->subtype, "html") ||
+	                                 strstr(p->subtype, "markdown")))
+		return 0;
+	return !(!strcmp(p->type, "message") && !strcmp(p->subtype, "rfc822"));
+}
+
 /* Envelopes for the messages in set ("from:to" or "a,b,c:d"); m[i] belongs
  * to seqs[i], or to from + i when seqs is NULL. */
 static int fetch_env(imap_t *im, const char *set, const uint32_t *seqs, uint32_t from,
                      uint32_t count, msg_t **out, int *nout)
 {
 	resp_t r = {0};
-	if (cmd(im, &r, "FETCH %s (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE)", set) != 0) {
+	if (cmd(im, &r, "FETCH %s (UID FLAGS INTERNALDATE RFC822.SIZE ENVELOPE BODYSTRUCTURE)", set) != 0) {
 		resp_free(&r);
 		return -1;
 	}
@@ -730,15 +814,27 @@ static int fetch_env(imap_t *im, const char *set, const uint32_t *seqs, uint32_t
 							else if (nis(f, "\\Flagged")) x->flagged = 1;
 							else if (nis(f, "\\Deleted")) x->deleted = 1;
 						}
+					} else if (nis(k, "BODYSTRUCTURE") && v->t == N_LIST) {
+						mpart_t *bs = xcalloc(1, sizeof *bs);
+						bs_parse(v, "", bs, 0);
+						x->att = part_has_att(bs, 0);
+						mpart_free(bs);
 					} else if (nis(k, "ENVELOPE") && v->t == N_LIST) {
 						node_t *date = v->kid;
 						node_t *subj = date ? date->next : NULL;
 						node_t *frm = subj ? subj->next : NULL;
 						free(x->subject);
 						free(x->from);
+						free(x->addr);
+						free(x->msgid);
 						x->date = mime_parse_date(nstr(date));
 						x->subject = mime_decode_words(nstr(subj));
 						x->from = addr_display(frm);
+						x->addr = addr_email(frm);
+						/* (date subject from sender reply-to to cc bcc in-reply-to message-id) */
+						const node_t *e = frm;
+						for (int f = 2; f < 9 && e; f++) e = e->next;
+						x->msgid = e && *nstr(e) ? xstrdup(nstr(e)) : NULL;
 					}
 				}
 				if (!x->date) x->date = idate;
@@ -1063,6 +1159,28 @@ int imap_create(imap_t *im, const char *mbox)
 	return rc;
 }
 
+int imap_delete(imap_t *im, const char *mbox)
+{
+	char *q = quote(mbox);
+	int rc = cmd(im, NULL, "DELETE %s", q);
+	if (rc == 0) cmd(im, NULL, "UNSUBSCRIBE %s", q);
+	free(q);
+	return rc;
+}
+
+int imap_rename(imap_t *im, const char *from, const char *to)
+{
+	char *qf = quote(from), *qt = quote(to);
+	int rc = cmd(im, NULL, "RENAME %s %s", qf, qt);
+	if (rc == 0) {
+		cmd(im, NULL, "UNSUBSCRIBE %s", qf);
+		cmd(im, NULL, "SUBSCRIBE %s", qt);
+	}
+	free(qf);
+	free(qt);
+	return rc;
+}
+
 const char *imap_password(imap_t *im) { return im->pass ? im->pass : ""; }
 
 int imap_noop(imap_t *im)
@@ -1277,6 +1395,8 @@ void msgs_free(msg_t *m, int n)
 	for (int i = 0; i < n; i++) {
 		free(m[i].from);
 		free(m[i].subject);
+		free(m[i].addr);
+		free(m[i].msgid);
 	}
 	free(m);
 }

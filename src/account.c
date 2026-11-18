@@ -423,6 +423,55 @@ void account_menu(void)
 	else switch_account(accts[i].name);
 }
 
+/* Account > Edit: the current account's name, full name, password. */
+void account_edit(void) { account_settings(); }
+
+/* Account > Remove: forget an account (not the one in use): its settings
+ * and stored passwords. Its mail stays where it is. */
+void account_remove(void)
+{
+	int cur = (int)(ac - accts);
+	if (naccts < 2) {
+		set_status("%s is the only account", ac->name);
+		return;
+	}
+	const char **items = xmalloc(sizeof *items * (size_t)naccts);
+	char (*txt)[160] = xmalloc(sizeof *txt * (size_t)naccts);
+	int *idx = xmalloc(sizeof *idx * (size_t)naccts), n = 0;
+	for (int i = 0; i < naccts; i++) {
+		if (i == cur) continue;
+		const account_t *a = &accts[i];
+		if (a->type == STORE_LOCAL)
+			snprintf(txt[n], sizeof txt[0], "%.40s  %.100s", a->name, a->path);
+		else
+			snprintf(txt[n], sizeof txt[0], "%.40s  %.50s@%.50s", a->name, a->user, a->host);
+		items[n] = txt[n];
+		idx[n++] = i;
+	}
+	int r = ui_list_dialog("Remove account", items, n, 0, "Enter remove   Esc cancel   (not the open one)",
+	                       draw_bg);
+	int i = r >= 0 ? idx[r] : -1;
+	free(items);
+	free(txt);
+	free(idx);
+	if (i < 0) return;
+	char name[64], l0[120];
+	snprintf(name, sizeof name, "%s", accts[i].name);
+	snprintf(l0, sizeof l0, "Remove account %.60s and its stored passwords?", name);
+	const char *lines[] = {l0, "Its mail stays on the server or on disk."};
+	static const ui_menuitem b[] = {{"Cancel", 0, 'c'}, {"Remove", 0, 'r'}};
+	if (ui_choice_dialog("Remove account", lines, 2, b, 2, 0, 1, draw_bg) != 1) return;
+	set_secret(&accts[i].pass_enc, NULL);
+	set_secret(&accts[i].smtp_pass_enc, NULL);
+	memmove(&accts[i], &accts[i + 1], sizeof *accts * (size_t)(naccts - i - 1));
+	naccts--;
+	memset(&accts[naccts], 0, sizeof *accts);
+	if (ac > &accts[i]) ac--;
+	A.asel = (int)(ac - accts);
+	config_save();
+	set_status("Account %s removed", name);
+}
+
 /* Ask for the SMTP settings. Returns 0 when filled in. */
 int smtp_settings(const char *err, ui_bg_fn bg)
 {

@@ -4,14 +4,15 @@
 #include "mcm.h"
 #include "helptext.h"   /* the help texts, from the files in help/ */
 
-void show_help(void)
+/* A help text in a window, @VERSION@ filled in. */
+static void show_lines(const char *title, const char *const *src)
 {
 	int n = 0;
-	while (HELP_KEYS[n]) n++;
+	while (src[n]) n++;
 	char **l = xcalloc((size_t)n + 1, sizeof *l);
 	for (int i = 0; i < n; i++) {
 		buf_t b = {0};
-		const char *s = HELP_KEYS[i], *v;
+		const char *s = src[i], *v;
 		while ((v = strstr(s, "@VERSION@"))) {
 			buf_add(&b, s, (size_t)(v - s));
 			buf_adds(&b, MCM_VERSION);
@@ -20,9 +21,30 @@ void show_help(void)
 		buf_adds(&b, s);
 		l[i] = buf_steal(&b);
 	}
-	ui_text_dialog("Help", (const char *const *)l, n, draw_bg);
+	ui_text_dialog(title, (const char *const *)l, n, draw_bg);
 	for (int i = 0; i < n; i++) free(l[i]);
 	free(l);
+}
+
+void show_help(void) { show_lines("Key list", HELP_KEYS); }
+
+void show_cmdline_help(void) { show_lines("Command line", HELP_CMDLINE); }
+
+void show_about(void)
+{
+	static const char *const about[] = {
+		"Mail Commander (mcm) @VERSION@",
+		"",
+		"A console email client in the spirit of PC Tools and",
+		"Midnight Commander: IMAPS, POP3S, Maildir, mbox and MH.",
+		"",
+		"https://github.com/Luke1970/mcm",
+		"",
+		"Free software under the GNU General Public License,",
+		"version 3 or (at your option) any later version.",
+		NULL,
+	};
+	show_lines("About", about);
 }
 
 void focus_to(int col)
@@ -64,6 +86,7 @@ void click_window(const cols_t *cl, int x, int y)
 			A.asel = idx;
 		} else if (col == COL_MSG) {
 			focus_to(COL_MSG);
+			msg_click(x, y);                 /* on a link or attachment: open it */
 		}
 		if (idx >= 0 && col == last_col && idx == last_idx && ms >= 0 && ms < 400) {
 			if (col == COL_LIST) focus_to(COL_MSG);              /* double click: open */
@@ -91,7 +114,9 @@ int handle_key(int ch)
 	switch (ch) {
 	case 'q': case 'Q':
 		return 0;
-	case KEY_F(1): case '?':
+	case KEY_F(1): case KEY_F(10):              /* the menu */
+		return menu_run();
+	case '?':
 		show_help();
 		return 1;
 	case '\t': case KEY_BTAB:
@@ -132,6 +157,7 @@ int handle_key(int ch)
 	case 's': case 'S': save_message(0); return 1;
 	case 'p': case 'P': save_message(1); return 1;
 	case 't': case 'T': attachments(); return 1;
+	case 'k': case 'K': links_window(0); return 1;
 	case 'm': case 'M': compose_start('m'); return 1;
 	case 'r': case 'R': compose_start('r'); return 1;
 	case 'f': case 'F': compose_start('f'); return 1;
@@ -230,8 +256,9 @@ int handle_key(int ch)
 		}
 	} else {
 		switch (ch) {
-		case KEY_UP: A.vtop--; break;
-		case KEY_DOWN: A.vtop++; break;
+		/* Up / Down: to the previous / next link on the screen, else scroll */
+		case KEY_UP: link_step(-1); break;
+		case KEY_DOWN: link_step(1); break;
 		case KEY_HOME: A.vtop = 0; break;
 		case KEY_END: A.vtop = A.nlines; break;
 		/* not wrapped: Left and Right move the text sideways; Left at the
@@ -241,7 +268,16 @@ int handle_key(int ch)
 			if (A.nowrap && !A.hex && A.hoff > 0) A.hoff = A.hoff > HSTEP ? A.hoff - HSTEP : 0;
 			else focus_to(wide() ? COL_LIST : A.left);
 			break;
-		case 27: focus_to(COL_LIST); break;
+		case 27:                                    /* leave the active link, else the window */
+			if (A.lk_url) link_clear();
+			else focus_to(COL_LIST);
+			break;
+		case '\n': case '\r': case KEY_ENTER:        /* the active link, else the links */
+			if (!link_open_active()) links_window(0);
+			break;
+		default:
+			if (ch >= '1' && ch <= '9') links_window(ch);          /* link number ... */
+			break;
 		}
 	}
 	return 1;

@@ -325,6 +325,33 @@ void open_folder(int idx)
 	A.last_poll = time(NULL);
 }
 
+/* Read the folder list again; the open folder keeps its place in it, and
+ * the folders window goes to folder sel (raw name; NULL: the open one). */
+int folders_reload(const char *sel)
+{
+	char *open = A.cur_folder >= 0 ? xstrdup(A.folders[A.cur_folder].name) : NULL;
+	folder_t *nf;
+	int nn;
+	if (store_list(A.im, &nf, &nn) != 0) {
+		free(open);
+		set_status("Cannot list folders: %s", store_error(A.im));
+		return -1;
+	}
+	folders_free(A.folders, A.nfolders);
+	A.folders = nf;
+	A.nfolders = nn;
+	A.cur_folder = -1;
+	A.fsel = 0;
+	for (int i = 0; open && i < nn; i++)
+		if (!strcmp(nf[i].name, open)) A.cur_folder = A.fsel = i;
+	for (int i = 0; sel && i < nn; i++)
+		if (!strcmp(nf[i].name, sel)) A.fsel = i;
+	free(open);
+	A.ffree = 0;
+	ensure_visible(&A.fsel, &A.ftop, A.frows, A.nfolders);
+	return 0;
+}
+
 /* Open the current folder again (after the store had another one
  * selected), keeping the filter and, as far as it goes, the cursor. */
 void reopen_folder(void)

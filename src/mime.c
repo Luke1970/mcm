@@ -917,6 +917,30 @@ time_t mime_parse_date(const char *in)
 	return timegm(&tm) - off;
 }
 
+/* The address in a From: header value (the one in <>, else the bare
+ * one), or NULL when there is none. */
+char *mime_addr_email(const char *v)
+{
+	if (!v) return NULL;
+	const char *s = v, *e;
+	const char *lt = strchr(v, '<'), *gt = lt ? strchr(lt, '>') : NULL;
+	if (lt && gt) {
+		s = lt + 1;
+		e = gt;
+	} else {
+		/* "addr (Name)" or a bare address: the word with the @ */
+		const char *at = strchr(v, '@');
+		if (!at) return NULL;
+		s = e = at;
+		while (s > v && !strchr(" \t\r\n<(\",", s[-1])) s--;
+		while (*e && !strchr(" \t\r\n>)\",", *e)) e++;
+	}
+	while (s < e && (*s == ' ' || *s == '\t')) s++;
+	while (e > s && (e[-1] == ' ' || e[-1] == '\t')) e--;
+	if (e <= s) return NULL;
+	return xstrndup(s, (size_t)(e - s));
+}
+
 /* Who a From: header value is: the decoded display name, else the address. */
 char *mime_addr_display(const char *v)
 {
@@ -946,4 +970,64 @@ char *mime_addr_display(const char *v)
 	char *r = buf_steal(&b);
 	if (!r) r = xstrdup("");
 	return r;
+}
+
+/* A part's Content-Type that is shown in the text (not an attachment). */
+static int shown_type(const char *t, size_t n)
+{
+	static const char *const ok[] = {"text/plain", "text/html", "text/markdown", "text/x-markdown",
+	                                 "message/rfc822", NULL};
+	if (n >= 10 && !strncasecmp(t, "multipart/", 10)) return 1;
+	for (int i = 0; ok[i]; i++)
+		if (strlen(ok[i]) == n && !strncasecmp(t, ok[i], n)) return 1;
+	return 0;
+}
+
+int mime_has_attachment(const char *raw, size_t len)
+{
+	size_t i = 0;
+	int top = 1, mixed = 0;
+	while (i < len) {
+		/* one header block: the message's, or a part's after a boundary */
+		int disp_att = 0, disp_inline = 0, cid = 0, other = 0, blank = 0;
+		while (i < len) {
+			size_t e = i;
+			while (e < len && raw[e] != '\n') e++;
+			size_t ll = e - i;
+			if (ll && raw[e - 1] == '\r') ll--;
+			const char *l = raw + i;
+			i = e < len ? e + 1 : e;
+			if (!ll) { blank = 1; break; }
+			if (ll > 13 && !strncasecmp(l, "Content-Type:", 13)) {
+				const char *v = l + 13;
+				while (v < l + ll && (*v == ' ' || *v == '\t')) v++;
+				size_t tn = 0;
+				while (v + tn < l + ll && v[tn] != ';' && v[tn] != ' ' && v[tn] != '\t') tn++;
+				if (!shown_type(v, tn)) other = 1;
+				if (top && tn == 15 && !strncasecmp(v, "multipart/mixed", 15)) mixed = 1;
+			} else if (ll > 20 && !strncasecmp(l, "Content-Disposition:", 20)) {
+				const char *v = l + 20;
+				while (v < l + ll && (*v == ' ' || *v == '\t')) v++;
+				if ((size_t)(l + ll - v) >= 10 && !strncasecmp(v, "attachment", 10)) disp_att = 1;
+				if ((size_t)(l + ll - v) >= 6 && !strncasecmp(v, "inline", 6)) disp_inline = 1;
+			} else if (ll > 11 && !strncasecmp(l, "Content-ID:", 11)) {
+				cid = 1;
+			}
+		}
+		/* an attachment: so marked, or a part that is not text and not
+		 * an inline picture of an HTML text (those have a Content-ID) */
+		if (disp_att || (other && !disp_inline && !cid)) return 1;
+		if (top && !blank) return 0;
+		if (top && i >= len) return mixed;      /* only the header was there */
+		top = 0;
+		/* to the next boundary line */
+		while (i < len) {
+			size_t e = i;
+			while (e < len && raw[e] != '\n') e++;
+			int bnd = e - i >= 3 && raw[i] == '-' && raw[i + 1] == '-' && raw[i + 2] != '-';
+			i = e < len ? e + 1 : e;
+			if (bnd) break;
+		}
+	}
+	return 0;
 }

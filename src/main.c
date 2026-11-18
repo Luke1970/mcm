@@ -23,7 +23,7 @@ app_t A;
 const ui_menuitem folder_menu[] = {
 	{"Quit", 0, 'q'}, {"Mail", 0, 'm'}, {"Reply", 0, 'r'}, {"Forward", 0, 'f'},
 	{"Account", 0, 'a'}, {"Config", 0, 'c'},
-	{"F1=Help", UI_HOT_KEYNAME, KEY_F(1)},
+	{"F1=Menu", UI_HOT_KEYNAME, KEY_F(1)},
 };
 const int nfolder_menu = (int)(sizeof folder_menu / sizeof *folder_menu);
 
@@ -664,9 +664,9 @@ int main(int argc, char **argv)
 			/* a scroll bar in a list's right border goes before dragging that
 			 * border (the window right of it still has its own edge) */
 			if (scrollbar_press(ev.x, ev.y)) continue;
-			if (A.hwx_x && ev.y == A.hwx_y && ev.x >= A.hwx_x && ev.x <= A.hwx_x + 10 &&
+			if (A.hwx_x && ev.y == A.hwx_y && ev.x >= A.hwx_x && ev.x <= A.hwx_x + 12 &&
 			    (ev.x - A.hwx_x) % 2 == 0) {
-				/* H W X S P T on the message's border: like the keys */
+				/* H W X S P T K on the message's border: like the keys */
 				handle_key(tolower((unsigned char)HWXSP[(ev.x - A.hwx_x) / 2]));
 				continue;
 			}

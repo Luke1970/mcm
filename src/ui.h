@@ -22,7 +22,7 @@
 #include "theme.h"
 
 #define UI_HOT_CAPS (-2)
-#define UI_HOT_KEYNAME (-3)   /* hotkey is the text before '=', e.g. "F1=Help" */
+#define UI_HOT_KEYNAME (-3)   /* hotkey is the text before '=', e.g. "F1=Menu" */
 
 /* Ctrl-Q and Ctrl-C quit mcm from anywhere: every key is read with
  * ui_getch() or ui_get_wch(), which call the function set here (it does not
@@ -97,6 +97,10 @@ int  ui_choice_dialog(const char *title, const char *const *lines, int n,
 /* Pick one of n lines: arrows, Enter or a click picks, Esc gives -1. */
 int  ui_list_dialog(const char *title, const char *const *items, int n, int def, const char *hint,
                     ui_bg_fn bg);
+/* The same, where item i has the number nums[i]: typing a number selects
+ * that item (key: a digit already typed, or 0). */
+int  ui_list_dialog_num(const char *title, const char *const *items, const int *nums, int n,
+                        int key, const char *hint, ui_bg_fn bg);
 
 /* Run $VISUAL/$EDITOR (vi; Windows: Notepad) on a file, curses put aside;
  * readonly: vi/vim/nvim/view get -R. Returns its exit status, -1 failed. */

@@ -66,4 +66,12 @@ int  local_copies(local_t *l, const char **dest);
  * NULL, first put them in folder back (undoing a move; flags are kept). */
 int  local_uncopy(local_t *l, const char *back);
 
+/* Folders: create one (of the kind most folders here are; Sent, Drafts,
+ * Deleted Items that are listed but not there yet are made), rename one
+ * (its subfolders go along; not INBOX, not the open folder), delete one
+ * with its messages (not one with subfolders). */
+int  local_create(local_t *l, const char *name);
+int  local_rename(local_t *l, const char *from, const char *to);
+int  local_delete_folder(local_t *l, const char *name);
+
 #endif
