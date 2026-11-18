@@ -490,7 +490,9 @@ int border_at(int x)
 	return 0;
 }
 
-void draw(void)
+/* Paint the main screen into stdscr only; the caller refreshes, so a menu or
+ * dialog on top goes out together with it and never flickers. */
+static void paint(void)
 {
 	A.need_list = A.need_more = A.need_hex = 0;
 	for (int i = 0; i < NSBS; i++) sbs[i].h = 0;   /* set again by windows that need one */
@@ -513,10 +515,15 @@ void draw(void)
 			}
 	}
 	draw_statusbar();
+}
+
+void draw(void)
+{
+	paint();
 	refresh();
 }
 
-void draw_bg(void) { draw(); }
+void draw_bg(void) { paint(); }
 
 void login_bg(void)
 {

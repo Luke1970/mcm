@@ -909,7 +909,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.992 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.993 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).

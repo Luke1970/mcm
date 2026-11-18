@@ -51,7 +51,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.992"
+#define MCM_VERSION   "0.993"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */

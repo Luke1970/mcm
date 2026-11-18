@@ -117,7 +117,7 @@ static void place(layout_t *L, int cur)
 
 static void draw_menu(const layout_t *L, int cur, int sel)
 {
-	draw();
+	draw_bg();                              /* no refresh: no flicker */
 	ui_fill(L->y, L->x, L->h, L->w, CP_MENU);
 	ui_box(L->y, L->x, L->h, L->w, CP_MENU, " Menu ", A_BOLD, CP_MENU);
 	int rows = maxrows();

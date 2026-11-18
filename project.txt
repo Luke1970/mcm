@@ -291,7 +291,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.992 Quit Mail Reply Forward Account Config F1=Menu  date time
+  mcm 0.993 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -391,6 +391,9 @@ Local (src/local.c):
 - Menu bar items are 2 columns apart (ui_menubar, ui_menu_hit); the clock
   keeps at least 2 columns from the last item (on 80 columns it moves to
   the right edge, so it still fits).
+- No flicker: the F1 menu and dialogs paint the main screen under them
+  with draw_bg (stdscr only, no refresh) and send everything with one
+  refresh; draw() itself is paint + refresh.
 - List bottom border: L at its left (bold, inverted while a filter is
   typed or applied; a click = L), the filter bar right of it.
 - Message window bottom border: H W X S P T K at its left (bold; H W X
