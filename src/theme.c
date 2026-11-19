@@ -348,8 +348,11 @@ static int fit(int c)
 {
 	if (c < 0) return -1;
 	if (COLORS >= 0x1000000) {               /* direct color: 0-7 palette, else RGB */
-		if (c & THEME_RGB) return c & 0xffffff;
-		return c < 8 ? c : xterm_rgb(c);
+		if (c < 8) return c;
+		int rgb = c & THEME_RGB ? c & 0xffffff : xterm_rgb(c);
+		/* RGB 0-7 would be palette colors 0-7 (#000000 the terminal's
+		 * own black, often dark gray): #010101 looks the same as black */
+		return rgb < 8 ? 0x010101 : rgb;
 	}
 	if (c & THEME_RGB) c = nearest256(c & 0xffffff);
 	if (c >= COLORS) c = basic8(c);

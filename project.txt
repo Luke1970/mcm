@@ -154,12 +154,16 @@ section per account:
   theme = default
   wrap_width = 72            (20-998)
   message_wrap = 1           W: long message lines wrapped (1) or not (0)
-  folders_width = 25         percent of the screen
+  folders_width = 0          Folders: % of the screen, 0 = 25 % but at most
+                             35 columns (0.994; 25, the old default, = 0)
   list_width = 45            percent (with three or four columns: of what is left)
-  accounts_width = 15        percent of the screen (four columns)
+  accounts_width = 0         Accounts: % of the screen, 0 = 25 columns (0.994;
+                             15, the old default, counts as 0)
   editor =                   when $VISUAL/$EDITOR are not set (empty: vi)
   pdf_viewer =               PDF attachments (empty: xdg-open)
   html_viewer =              http/https/ftp links (empty: xdg-open)
+  pdf_viewer_console =       the same without X/Wayland (empty: fbpdf,
+  html_viewer_console =        jfbview, fbgs, pdftotext|less; w3m, lynx ...)
   last_account = Work
   master_check = enc1$...    the word "emsg" encrypted with the master password
 
@@ -291,7 +295,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.993 Quit Mail Reply Forward Account Config F1=Menu  date time
+  mcm 0.994 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -325,6 +329,16 @@ Local (src/local.c):
   ...) or no $DISPLAY/$WAYLAND_DISPLAY -> ui_run_program (waits, in the
   terminal); else sh -c "exec $0 \"$1\"" in a detached grandchild.
   Windows: CreateProcess, not waited for. HTML attachments stay refused.
+- Graphical or console (0.994, attach.c): graphical() = $DISPLAY or
+  $WAYLAND_DISPLAY set (Windows: always). viewer_for('p'|'h') gives the
+  program: pdf_viewer/html_viewer when graphical, else the _console
+  settings, else the first in $PATH (in_path) of fbpdf jfbview fbgs, then
+  "pdftotext -layout %s - | less"; w3m lynx elinks links links2. "" =
+  xdg-open, NULL = none found (status line says which setting to set).
+  A command with %s is a shell command line, %s -> "$1" (viewer_script in
+  ui.c, also for ui_run_program). Without a desktop, xdg-open for other
+  attachments runs in the terminal too (it was detached to /dev/null).
+  mcm --programs prints the environment and the chosen programs.
 - Status line: "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
   with the focus on the email list, "Enter Open  F5 Refresh  Q/^Q Quit" on
   the folders and accounts (no F1, Tab, column or L/O hint: F1=Menu is in
@@ -397,8 +411,9 @@ Local (src/local.c):
 - List bottom border: L at its left (bold, inverted while a filter is
   typed or applied; a click = L), the filter bar right of it.
 - Message window bottom border: H W X S P T K at its left (bold; H W X
-  inverted while on: H all headers, W wrapped lines, X hex dump; S save,
-  P print, T attachments, K links; a click = the key). W also switches H and X off. Then,
+  inverted while on: H all headers, W wrapped lines, X hex dump, T plain
+  text; S save, P print, K links and attachments, inverted when the
+  message has any (open_has_att, open_has_links); a click = the key). W also switches H and X off. Then,
   with W off and a line wider than the window, a horizontal scroll bar
   (draw_hscrollbar, sbs[SB_HMSG]: arrows 8 columns, track a page, drag the
   thumb) up to the corner; otherwise the paging hint on the right.
@@ -428,6 +443,56 @@ Local (src/local.c):
   kept (static) for the next time. An item runs either an action (DO_*)
   or handle_key(its key), after the window is closed and the screen
   drawn again.
+- Plain text that is an HTML page (0.994, mime_looks_like_html in mime.c:
+  "<!DOCTYPE html" or "<html" after blank lines and a BOM) or has 3+ CSS
+  rules ("sel{prop:value}", also with spaces "sel { prop: value; }":
+  css_rules; together mime_plain_is_bad): in a
+  multipart/alternative the HTML part is shown instead. Local mail:
+  alt_pick (mime.c) decodes the start of the plain part. IMAP: mv_open
+  checks the fetched plain leaves (mv_repick), sets mpart_t.html_inside,
+  walks again (rewalk; alt_pick in msgview.c then takes the HTML) and
+  fetches the new leaves. HTML text: invisible characters out before
+  tidy(), and tidy counts a line of spaces as empty (at most one empty
+  line in a row). U+2000-200A, 202F, 205F count as spaces.
+- Invisible characters (0.994, textconv.c strip_invisible): U+200B 200C
+  2060 FEFF 034F 00AD are dropped from every text part (not U+200D: emoji);
+  in text/plain also as entities (&#8204; &#x200C; &zwnj; &shy; ...) and a
+  literal &nbsp; next to them. Spaces around what was dropped shrink to
+  one, none at the end of the line. Run after unflowing (format=flowed
+  trailing spaces): render_part in mime.c, and for IMAP parts msgview.c
+  (plain) / mime_decode_text (HTML, Markdown).
+- xfer.c (0.994): Account > export / import (menu items without a letter:
+  every letter of both words was taken).
+  - Export: All folders or the one at A.fsel; a new or empty directory
+    (export_target_bad: refused when it or a directory above it is a
+    Maildir, or is a local account's path), ~/mcm-export-DATE by default.
+    INBOX = the Maildir, others .A.B (Maildir++ with maildirfolder; parts
+    decoded, '.' '/' -> '_', then mutf7_encode; the INBOX prefix of
+    fld_prefix stripped; duplicates get _2). Every folder: store_select,
+    headers in chunks of 200, BODY.PEEK[] per message,
+    local_maildir_write (local.c md_write, shared with append_maildir:
+    cur/NAME:2,FLAGS incl. T for \Deleted, mtime = message date).
+    store_folder_real skips local Sent/Drafts/Deleted Items not made yet.
+    reopen_folder() afterwards.
+  - Import: local_open(source, 0) in a local_t of its own; its folders
+    (local_folder_real) go to fld_stored("[prefix]Imported-DATE" d parts),
+    d the account's separator in parts -> '_'. The first folder is a test:
+    when it cannot be made, the parent is made first; when that fails,
+    nothing can be made (message); when the child still fails, ask, then
+    flat names "Imported-DATE - A - B" at the top (the empty parent is
+    deleted). A later folder that fails gets "Imported-DATE/A - B", else
+    the top-level flat name, and is listed in the warning. Messages: flags
+    without \Deleted, CRLF for IMAP, store_append. Afterwards the parent
+    itself is made when missing (Maildir++), folders_reload.
+  - Both: progress window every 100 ms, Esc asks to stop.
+  - Command line (0.994): --export DIR / --import PATH (also =DIR) are
+    taken out of argv before getopt; both at once, or one without its
+    argument: error, exit 2. --export is checked (xfer_export_check)
+    and --import must exist before the login. After do_login:
+    folders_reload, xfer_export(dir, -1) or xfer_import_open +
+    xfer_import, ui_end, the message on stdout (error: stderr, "mcm: "),
+    exit 0 / 1. The menu items use the same functions after their
+    dialogs.
 - fldops.c (0.985), the folder that A.fsel points at:
   - Create: ui_input_dialog. The name is typed with the folder separator
     (delim(): INBOX's, else the first one). When every IMAP folder is
@@ -495,7 +560,9 @@ Local (src/local.c):
 - Bottom line: account, short key help, and status messages.
 - Email list rows: flags in 3 columns (N new, A answered, * flagged, D
   deleted; @ attachment, 0.987; + selected), subject,
-  sender (display name, shortened with ...), date as YYMMDD.HH:MM. Newest
+  sender (display name, shortened with ...), date (0.994): two windows
+  14:25 for today, else Nov19; three or four windows Thu 2026Nov19 15:30
+  (list_date in screen.c; English names, fixed width). Newest
   at the top.
 - Attachment hint (0.987): msg_t.att.
   - IMAP: the list FETCH also asks BODYSTRUCTURE; part_has_att (imap.c)
@@ -605,8 +672,14 @@ Main screen:
                        is on the screen (hits[]); a click there
                        (click_window -> msg_click) makes it the active
                        one and opens it.
-  T                    attachments: list (ui_list_dialog), then Open or
-                       Save. IMAP: from BODYSTRUCTURE (mv_attachments,
+  T                    (0.994) the plain-text version as sent
+                       (msg_toggle_plain -> mv_set_plain: mv->plain,
+                       alt_pick takes text/plain, no strip_invisible;
+                       local mail through mime_render: mime_set_plain).
+                       Off when another message opens (mv_open clears
+                       mv). No plain part: status line, stays off.
+  (until 0.994: T)     attachments, now only in the K window: list
+                       (ui_list_dialog), then Open or Save. IMAP: from BODYSTRUCTURE (mv_attachments,
                        the parts shown as [Attachment]), only the chosen
                        part fetched (mv_fetch_part, 1 MB blocks) and
                        decoded (mime_decode_cte). Local/POP3: the raw
@@ -699,12 +772,24 @@ file picker and the editor, without questions:
 - 24-bit color where the terminal has it; otherwise the nearest of 256
   colors (darkblue -> 17). With TERM=xterm-256color and
   COLORTERM=truecolor/24bit the xterm-direct description is used, unless
-  MCM_NO_DIRECT=1.
+  MCM_NO_DIRECT=1. There color values 0-7 are the terminal's palette, so
+  fit() sends RGB #000000-#000007 as #010101 (Konsole showed #000000 as
+  its palette black, dark gray).
 - Shipped: default (PC Tools: white on dark blue, cyan bar, light gray
-  menu, orange hotkeys), mc, dark, mono, eink (black on white, grays
-  only; black menus, gray bar so bold hotkeys stay readable), night (dark
-  red #870000 on black, no blue/white; chosen to map to 52/88/124/160 on
-  256 colors), amber, green (monochrome monitors), paper (light).
+  menu, orange hotkeys), mc, dark, mono, eink-256color (black on white, grays
+  only; black menus, gray bar so bold hotkeys stay readable), night-256color (dark
+  red #870000 on #000000, no blue/white; chosen to map to 52/88/124/160 on
+  256 colors; #000000 = 16, true black, as "black" is the terminal's color
+  0, which many color schemes show as dark gray), amber-256color,
+  green-256color (monochrome monitors), paper-256color (light). Black is
+  #000000 in night, amber, green, eink and dark (background); default, mc
+  and mono keep the palette names on purpose, so they follow the
+  terminal's colors.
+- Since 0.994 the themes with #RRGGBB colors are called NAME-256color
+  (they need 256 colors or more); default, mc, dark and mono use the basic
+  colors and keep their names. load_theme (account.c): when no NAME.theme
+  is found (user folder, ./themes, DATADIR), NAME-256color is tried and
+  A.theme becomes that name, so theme = night and -t night still work.
 - Config -> Theme: theme_names() (theme.c) lists NAME.theme in the user's
   folder, ./themes and DATADIR/themes, sorted, no duplicates; the choice is
   loaded with load_theme() (account.c, also used at start), applied with
@@ -971,7 +1056,7 @@ the login times calculated from them.
                   bars, status line
   src/msgwin.c    message window: text index, wrap, hex, ':' commands,
                   save and print
-  src/attach.c    attachments (T)
+  src/attach.c    attachments (the K window)
   src/keys.c      keys of the main screen, clicks in windows, help window
   src/certs.c     untrusted certificates, ~/.config/mcm/certs
   src/account.c   accounts, stored passwords, Config menu, SMTP settings

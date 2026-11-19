@@ -30,6 +30,11 @@ Options:
   -u USER     login name
   -t THEME    color theme: a name (~/.config/mcm/NAME.theme) or a file
   -V          version
+  --programs  which PDF viewer, web browser and editor mcm uses here
+  --export DIR   log in, write every folder into the new Maildir DIR, quit
+  --import PATH  log in, copy a Maildir, mbox or MH folder (or a directory
+              of them) into a new folder Imported-DATE, quit
+              (not both at once; -a NAME chooses the account)
   -h, --help  this text
 
 An account with the same server and user (or path) is used, or a new one is

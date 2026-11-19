@@ -39,6 +39,8 @@ typedef struct {
 	size_t    more_off;      /* offset of the first "more" marker, or MV_NO_MORE */
 	int       flowed;        /* a shown text part was format=flowed (unwrapped) */
 	size_t    hdr_end;       /* text before this offset is the header section */
+	int       plain;         /* T: the plain-text version as sent, not mcm's choice */
+	int       plain_changed;
 
 	/* hex window */
 	size_t    hex_off;
@@ -47,6 +49,11 @@ typedef struct {
 
 int  mv_open(msgview_t *mv, store_t *im, uint32_t uid, uint32_t size);
 void mv_close(msgview_t *mv);
+/* T: show the plain-text version of the message as sent (on), or mcm's
+ * choice again (off). 0 done, 1 the message has no plain-text version,
+ * -1 error (fetching). mv_render afterwards. */
+int  mv_set_plain(msgview_t *mv, store_t *im, int on);
+int  mv_repick(msgview_t *mv, store_t *im);
 
 /* (Re)build mv->text for display. */
 void mv_render(msgview_t *mv, int all_headers);

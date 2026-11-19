@@ -44,6 +44,7 @@ typedef struct mpart {
 	int           attachment;    /* Content-Disposition: attachment */
 	int           flowed, delsp; /* text/plain; format=flowed; delsp=yes (RFC 3676) */
 	uint32_t      size;          /* encoded size in octets */
+	int           html_inside;   /* text/plain that holds an HTML page (msgview.c) */
 	struct mpart *kids;          /* children of a multipart */
 	int           nkids;
 } mpart_t;

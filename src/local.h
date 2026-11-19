@@ -77,4 +77,13 @@ int  local_create(local_t *l, const char *name);
 int  local_rename(local_t *l, const char *from, const char *to);
 int  local_delete_folder(local_t *l, const char *name);
 
+/* Export (xfer.c): write a message into Maildir dir (cur/ new/ tmp/ made
+ * when missing) with IMAP flags, the file time set to mtime when > 0;
+ * -1: err says why. Is path a Maildir (cur/ and new/)? */
+int  local_maildir_write(const char *dir, const char *flags, const char *data, size_t len,
+                         time_t mtime, char *err, size_t errn);
+int  local_is_maildir(const char *path);
+/* Is folder name there (not only listed, like Sent before it is made)? */
+int  local_folder_real(local_t *l, const char *name);
+
 #endif

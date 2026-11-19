@@ -82,9 +82,13 @@ as shown on bottom of window H W X S P T K:
                      S  save the message as shown in ~/Downloads
                         (or ~): mcm--FROM--DATE--SUBJECT.txt
                      P  print the message (lp)
-                     T  attachments: open one (in the desktop's
-                        viewer) or save it in ~/Downloads
-                     K  links in the message (the [n] numbers and
+                     T  the plain-text version as the sender wrote
+                        it (inverted while on; off again for the
+                        next message). Normally mcm shows the HTML
+                        version when the plain text is empty, an
+                        HTML page or full of CSS.
+                     K  links and attachments (inverted when the
+                        message has any): links in the message (the [n] numbers and
                         written-out web addresses): choose with
                         Up/Down or type the number, Enter opens it
                         in the browser. In the message window Enter
@@ -126,7 +130,9 @@ F1 / F10             the menu: every command in six columns (MCM,
                      a highlighted letter (or /) runs its item from
                      any column; Esc closes the menu.
                      Folders: creaTe, Delete, reName, moVe work on
-                     the folder the folders window points at
+                     the folder the folders window points at.
+                     Account: export writes mail to a new Maildir,
+                     import copies a Maildir or mbox into a new folder
 ?                    this key list
 Q                    quit
 Ctrl-Q / Ctrl-C      quit at once, from anywhere (also in dialogs and

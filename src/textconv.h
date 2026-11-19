@@ -21,4 +21,10 @@
 void html_to_text(const char *s, size_t len, buf_t *out);
 void md_to_text(const char *s, size_t len, buf_t *out);
 
+/* Append s without the characters that show nothing (zero-width space and
+ * non-joiner, soft hyphen, BOM, ...); entities: also those written as HTML
+ * entities (&#8204; &zwnj;), for plain text made from HTML. Spaces between
+ * them shrink to one, and none are left at the end of a line. */
+void strip_invisible(const char *s, size_t len, int entities, buf_t *out);
+
 #endif

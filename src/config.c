@@ -96,11 +96,17 @@ void config_load(void)
 		if (!strcasecmp(k, "folders_width") || !strcasecmp(k, "list_width") ||
 		    !strcasecmp(k, "accounts_width")) {
 			int w = atoi(v);
+			/* accounts_width 15 and folders_width 25 were the defaults written
+			 * by older versions: now 0 (25 columns; 25 % up to 35 columns) */
+			if (tolower((unsigned char)*k) == 'a' && (w == 0 || w == 15)) { col_pct[2] = 0; continue; }
+			if (tolower((unsigned char)*k) == 'f' && (w == 0 || w == 25)) { col_pct[0] = 0; continue; }
 			if (w >= 5 && w <= 95) col_pct[tolower((unsigned char)*k) == 'l' ? 1 : tolower((unsigned char)*k) == 'a' ? 2 : 0] = w;
 			continue;
 		}
 		if (!strcasecmp(k, "editor")) { snprintf(cfg_editor, sizeof cfg_editor, "%s", v); continue; }
 		if (!strcasecmp(k, "pdf_viewer")) { snprintf(cfg_pdf_viewer, sizeof cfg_pdf_viewer, "%s", v); continue; }
+		if (!strcasecmp(k, "pdf_viewer_console")) { snprintf(cfg_pdf_viewer_console, sizeof cfg_pdf_viewer_console, "%s", v); continue; }
+		if (!strcasecmp(k, "html_viewer_console")) { snprintf(cfg_html_viewer_console, sizeof cfg_html_viewer_console, "%s", v); continue; }
 		if (!strcasecmp(k, "html_viewer")) { snprintf(cfg_html_viewer, sizeof cfg_html_viewer, "%s", v); continue; }
 		if (!strcasecmp(k, "master_check")) { set_secret(&master_check, xstrdup(v)); continue; }
 		if (!a && !(a = account_new(NULL))) break;   /* old file: settings without a section */
@@ -157,17 +163,30 @@ void config_save(void)
 	fprintf(f, "wrap_width = %d       # new mail is wrapped at this column (format=flowed)\n",
 	        wrap_width);
 	fprintf(f, "message_wrap = %d     # 1: long lines in the message are wrapped (W)\n", !A.nowrap);
-	fprintf(f, "folders_width = %d    # %% of the screen for Folders (next to the list)\n", col_pct[0]);
+	fprintf(f, "folders_width = %d    # %% of the screen for Folders (0: 25 %%, at most 35 columns)\n", col_pct[0]);
 	fprintf(f, "list_width = %d       # %% for the list (3 columns: of what the folders leave)\n",
 	        col_pct[1]);
-	fprintf(f, "accounts_width = %d   # %% of the screen for Accounts (4 columns, over 170)\n",
+	fprintf(f, "accounts_width = %d   # %% of the screen for Accounts (0: 25 columns)\n",
 	        col_pct[2]);
+#ifdef _WIN32
+	fprintf(f, "# Programs (empty: the default). editor is used when %%VISUAL%% and %%EDITOR%%\n"
+	           "# are not set (default Notepad); pdf_viewer opens PDF files and html_viewer\n"
+	           "# web links (default: the program Windows uses for them). The _console ones\n"
+	           "# are not used on Windows. A command may have arguments; the file or link\n"
+	           "# is added at the end, or put where %%s is. mcm --programs shows what is used.\n");
+#else
 	fprintf(f, "# Programs (empty: the default). editor is used when $VISUAL and $EDITOR\n"
-	           "# are not set (default vi, Windows Notepad); pdf_viewer opens PDF files and\n"
-	           "# html_viewer web links (default: the desktop's program, xdg-open). A command\n"
-	           "# may have arguments; the file or link is added at the end.\n");
+	           "# are not set (default vi); pdf_viewer opens PDF files and html_viewer web\n"
+	           "# links (default: the desktop's program, xdg-open). Without X or Wayland\n"
+	           "# the _console ones are used (default: the first installed of fbpdf,\n"
+	           "# jfbview, fbgs, pdftotext | less; w3m, lynx, elinks, links). A command may\n"
+	           "# have arguments; the file or link is added at the end, or put where %%s\n"
+	           "# is. mcm --programs shows what is used.\n");
+#endif
 	fprintf(f, "editor = %s\npdf_viewer = %s\nhtml_viewer = %s\n", cfg_editor, cfg_pdf_viewer,
 	        cfg_html_viewer);
+	fprintf(f, "pdf_viewer_console = %s\nhtml_viewer_console = %s\n", cfg_pdf_viewer_console,
+	        cfg_html_viewer_console);
 	if (*last_account) fprintf(f, "last_account = %s\n", last_account);
 	if (master_check) fprintf(f, "master_check = %s\n", master_check);
 	for (int i = 0; i < naccts; i++) {

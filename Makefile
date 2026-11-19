@@ -138,7 +138,7 @@ win/obj/mcm.res: win/mcm.rc win/mcm.manifest
 	cd win && $(WIN_RC) -O coff -o obj/mcm.res mcm.rc
 
 win/mcm/mcm.exe: $(WIN_OBJ) win/obj/libpdcurses.a $(wildcard themes/*.theme)
-	@mkdir -p win/mcm/themes
+	rm -rf win/mcm/themes && mkdir -p win/mcm/themes
 	$(WIN_CC) -static -s -o $@ $(WIN_OBJ) win/obj/libpdcurses.a -L$(WIN_LIBDIR) -lssl -lcrypto \
 	  -lz -liconv -lws2_32 -lcrypt32 -lbcrypt -ladvapi32 -luser32 -lgdi32 -lpathcch -lshell32
 	cp themes/*.theme win/mcm/themes/

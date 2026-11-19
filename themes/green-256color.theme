@@ -1,8 +1,8 @@
 # Green phosphor monochrome monitor
-BACKGROUND   = black
+BACKGROUND   = #000000
 TEXT         = #33ff33
 HIGHLIGHTBG  = #33ff33
-HIGHLIGHTTXT = black
+HIGHLIGHTTXT = #000000
 MENUBG       = #0d400d
 MENUTXT      = #33ff33
 HOTKEY       = #ccffcc

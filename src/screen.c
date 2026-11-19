@@ -10,6 +10,7 @@ static int str_width(const char *s);
 static void draw_filter_bar(int y, int x, int w);
 static void draw_list(int x, int y, int w, int h, int focused);
 static void sb_moved(int col);
+static void list_date(char *out, size_t n, time_t t, int fmt, const struct tm *now);
 static void draw_column(int col, int x, int y, int w, int h);
 static void draw_statusbar(void);
 static int clampi(int v, int lo, int hi);
@@ -211,8 +212,13 @@ static void draw_list(int x, int y, int w, int h, int focused)
 	draw_scrollbar(COL_LIST, x + w - 1, y + 1, rows, nrows(), &A.mtop);
 
 	/* columns: flags (N A D or *, @ attachment, + selected) | subject | from |
-	 * date (YYMMDD.HH:MM) */
-	int datew = 12;
+	 * date: two windows 14:25 (today) or Nov19, three or four windows
+	 * Thu 2026Nov19 15:30 */
+	int dfmt = wide();
+	int datew = dfmt ? 19 : 5;
+	struct tm now;
+	time_t tnow = time(NULL);
+	localtime_r(&tnow, &now);
 	int fromw = inner >= 70 ? 22 : inner >= 48 ? 16 : 0;
 	int subjw = inner - 3 - 1 - datew - (fromw ? fromw + 1 : 0);
 	if (subjw < 4) { fromw = 0; subjw = inner - 4 - datew; }
@@ -235,11 +241,7 @@ static void draw_list(int x, int y, int w, int h, int focused)
 		char flag[4] = {m->deleted ? 'D' : !m->seen ? 'N' : m->answered ? 'A' : m->flagged ? '*' : ' ',
 		                m->att ? '@' : ' ', picked ? '+' : ' ', 0};
 		char date[32] = "";
-		if (m->date) {
-			struct tm tm;
-			localtime_r(&m->date, &tm);
-			strftime(date, sizeof date, "%y%m%d.%H:%M", &tm);
-		}
+		if (m->date) list_date(date, sizeof date, m->date, dfmt, &now);
 		ui_puts(yy, xx, flag, 3, a, pair);
 		xx += 3;
 		ui_puts(yy, xx, *m->subject ? m->subject : "(no subject)", subjw, a, pair);
@@ -259,6 +261,27 @@ static void draw_list(int x, int y, int w, int h, int focused)
 	/* ask for headers when rows within half a page of the view are missing */
 	for (int i = A.mtop - rows / 2; i < A.mtop + rows + rows / 2; i++)
 		if (i >= 0 && i < nrows() && !msg_at(i)) { A.need_list = 1; break; }
+}
+
+/* The date of a message in the list: fmt 0 "14:25" (today) or "Nov19",
+ * 1 "Thu 2026Nov19 15:30". In English, not the locale's names: those
+ * differ in width (Chinese 11月), which would break the column. */
+static void list_date(char *out, size_t n, time_t t, int fmt, const struct tm *now)
+{
+	static const char *const mon[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+		"Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+	static const char *const day[] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+	struct tm tm;
+	localtime_r(&t, &tm);
+	if (fmt == 0) {
+		if (tm.tm_year == now->tm_year && tm.tm_yday == now->tm_yday)
+			snprintf(out, n, "%02d:%02d", tm.tm_hour, tm.tm_min);
+		else
+			snprintf(out, n, "%s%02d", mon[tm.tm_mon], tm.tm_mday);
+	} else {
+		snprintf(out, n, "%s %04d%s%02d %02d:%02d", day[tm.tm_wday], (tm.tm_year + 1900) % 10000,
+		         mon[tm.tm_mon], tm.tm_mday % 100, tm.tm_hour % 100, tm.tm_min % 100);
+	}
 }
 
 /* A scroll bar moved window col: lists keep their selection (as the wheel
@@ -429,12 +452,27 @@ int full(void) { return COLS > FULL_COLS; }
  * screen; col_pct[1] the list's: of the screen in two columns, of what the
  * windows left of it leave otherwise; col_pct[2] the accounts' (full). */
 
+/* The Accounts window's width (at most hi): accounts_width % of the
+ * screen, 0 (the default) 25 columns. */
+static int accts_w(int hi)
+{
+	return clampi(col_pct[2] ? COLS * col_pct[2] / 100 : 25, MIN_LEFT, hi);
+}
+
+/* The Folders window's width (at most hi): folders_width % of the screen,
+ * 0 (the default) 25 % but at most 35 columns. */
+static int folders_w(int hi)
+{
+	int w = col_pct[0] ? COLS * col_pct[0] / 100 : COLS / 4 < 35 ? COLS / 4 : 35;
+	return clampi(w, MIN_LEFT, hi);
+}
+
 void get_cols(cols_t *c)
 {
 	memset(c, 0, sizeof *c);
 	if (full()) {
-		int aw = clampi(COLS * col_pct[2] / 100, MIN_LEFT, COLS - 3 * MIN_LEFT - 20);
-		int fw = clampi(COLS * col_pct[0] / 100, MIN_LEFT, COLS - aw - 2 * MIN_LEFT - 20);
+		int aw = accts_w(COLS - 3 * MIN_LEFT - 20);
+		int fw = folders_w(COLS - aw - 2 * MIN_LEFT - 20);
 		int lw = clampi((COLS - aw - fw) * col_pct[1] / 100, MIN_LEFT, COLS - aw - fw - 20);
 		c->n = 4;
 		c->col[0] = COL_ACCTS;   c->x[0] = 0;            c->w[0] = aw;
@@ -442,7 +480,8 @@ void get_cols(cols_t *c)
 		c->col[2] = COL_LIST;    c->x[2] = aw + fw;      c->w[2] = lw;
 		c->col[3] = COL_MSG;     c->x[3] = aw + fw + lw; c->w[3] = COLS - aw - fw - lw;
 	} else if (wide()) {
-		int fw = clampi(COLS * col_pct[0] / 100, MIN_LEFT, COLS - 2 * MIN_LEFT - 20);
+		int fw = A.side == COL_ACCTS ? accts_w(COLS - 2 * MIN_LEFT - 20)
+		                             : folders_w(COLS - 2 * MIN_LEFT - 20);
 		int lw = clampi((COLS - fw) * col_pct[1] / 100, MIN_LEFT, COLS - fw - 20);
 		c->n = 3;
 		c->col[0] = A.side;      c->x[0] = 0;       c->w[0] = fw;
@@ -450,7 +489,9 @@ void get_cols(cols_t *c)
 		c->col[2] = COL_MSG;     c->x[2] = fw + lw; c->w[2] = COLS - fw - lw;
 	} else {
 		int hi = COLS - 20 > MIN_LEFT ? COLS - 20 : MIN_LEFT;
-		int lw = clampi(COLS * col_pct[A.left == COL_LIST] / 100, MIN_LEFT, hi);
+		int lw = A.left == COL_ACCTS ? accts_w(hi)
+		         : A.left == COL_FOLDERS ? folders_w(hi)
+		                                 : clampi(COLS * col_pct[1] / 100, MIN_LEFT, hi);
 		c->n = 2;
 		c->col[0] = A.left;  c->x[0] = 0;  c->w[0] = lw;
 		c->col[1] = COL_MSG; c->x[1] = lw; c->w[1] = COLS - lw;
@@ -460,9 +501,18 @@ void get_cols(cols_t *c)
 /* The width setting that border b (the left edge of visible column b) uses. */
 int *border_pct(int b)
 {
-	if (full()) return &col_pct[b == 1 ? 2 : b == 2 ? 0 : 1];
-	if (wide()) return &col_pct[b == 2];
-	return &col_pct[A.left == COL_LIST];
+	int *p = full() ? &col_pct[b == 1 ? 2 : b == 2 ? 0 : 1]
+	         : wide() ? (b == 1 && A.side == COL_ACCTS ? &col_pct[2] : &col_pct[b == 2])
+	         : A.left == COL_ACCTS ? &col_pct[2] : &col_pct[A.left == COL_LIST];
+	if ((p == &col_pct[2] || p == &col_pct[0]) && !*p) {   /* the default: in % from now on */
+		cols_t c;
+		get_cols(&c);
+		int col = p == &col_pct[2] ? COL_ACCTS : COL_FOLDERS;
+		for (int i = 0; i < c.n; i++)
+			if (c.col[i] == col) *p = clampi((c.w[i] * 100 + COLS / 2) / COLS, 5, 95);
+		if (!*p) *p = 25;
+	}
+	return p;
 }
 
 /* Put border b at screen column x (the first column right of it). */

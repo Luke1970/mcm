@@ -68,6 +68,9 @@ int  store_undo(store_t *s);
  * rename one (its subfolders go along). Local folders: see local.h; the
  * open folder cannot be deleted or renamed there (select another first). */
 int  store_create(store_t *s, const char *name);
+/* Is folder name there? Local Sent, Drafts and Deleted Items are listed
+ * before the first message makes them: 0 until then. IMAP: always 1. */
+int  store_folder_real(store_t *s, const char *name);
 int  store_delete_folder(store_t *s, const char *name);
 int  store_rename_folder(store_t *s, const char *from, const char *to);
 

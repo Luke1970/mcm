@@ -492,3 +492,8 @@ int store_search(store_t *s, const char *text, uint32_t n, uint32_t **out, int *
 	*nout = cnt;
 	return 0;
 }
+
+int store_folder_real(store_t *s, const char *name)
+{
+	return s->loc ? local_folder_real(s->loc, name) : 1;
+}

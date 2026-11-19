@@ -7,7 +7,7 @@
  *   folder.c   message list cache, opening and refreshing folders, filter
  *   screen.c   drawing the windows, column layout and borders, scroll bars
  *   msgwin.c   the message window: text, wrap, hex, ':' commands, save/print
- *   attach.c   attachments (T)
+ *   attach.c   attachments (in the K window)
  *   keys.c     keys, mouse clicks in the windows, help window
  *   certs.c    untrusted certificates
  *   account.c  accounts, stored passwords, Config menu, SMTP settings
@@ -51,7 +51,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.993"
+#define MCM_VERSION   "0.994"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -108,6 +108,7 @@ extern int wrap_width;             /* new mail is wrapped at this column */
 /* Programs from mcm.conf; empty: the default. pdf_viewer opens PDF files,
  * html_viewer web links (the editor: cfg_editor in ui.h). */
 extern char cfg_pdf_viewer[256], cfg_html_viewer[256];
+extern char cfg_pdf_viewer_console[256], cfg_html_viewer_console[256];
 extern int col_pct[3];  /* window widths in %: [0] Folders (of
                                         * the screen), [1] the list (of what is
                                         * left of it), [2] Accounts (4 columns) */
@@ -258,6 +259,7 @@ void handle_key_wrap(void);
 int msg_colon(void);
 int msg_colon_with(const char *init);
 void links_window(int key);
+void msg_toggle_plain(void);   /* T */
 void link_step(int dir);
 int link_active_visible(void);
 int link_open_active(void);
@@ -283,9 +285,10 @@ void login_bg(void);
 
 /* attach.c */
 void att_cleanup(void);
-void attachments(void);
 int open_with_viewer(const char *path);
 int open_url(const char *url);
+int graphical(void);
+const char *viewer_for(int kind);
 /* The links window's share: the open message's attachments as list items
  * ("name  (type, size)", malloc'd; returns how many), Open/Save for one of
  * them, and freeing them again. */
@@ -312,6 +315,20 @@ void folder_create(void);
 void folder_delete(void);
 void folder_rename(void);
 void folder_move(void);
+char fld_delim(void);
+void fld_prefix(char *out, size_t n);
+char *fld_shown(const char *raw);
+char *fld_stored(const char *typed);
+
+/* xfer.c: Account > export (to a new Maildir) and import (into a new folder) */
+void folder_export(void);
+void folder_import(void);
+/* the work, also for mcm --export DIR / --import PATH (msg: what happened) */
+struct local;
+const char   *xfer_export_check(const char *dir, char *why, size_t n);
+int           xfer_export(const char *dir, int only, buf_t *msg);
+struct local *xfer_import_open(const char *path, buf_t *msg);
+int           xfer_import(struct local *src, buf_t *msg);
 
 /* certs.c */
 int cert_check(const net_certinfo *ci, void *ctx);

@@ -11,7 +11,7 @@
 
 /* What an item does: a key of the main screen, or one of these. */
 enum { DO_ABOUT = 0x10000, DO_ACC_SELECT, DO_ACC_ADD, DO_ACC_EDIT, DO_ACC_REMOVE, DO_FLD_SELECT,
-       DO_FLD_CREATE, DO_FLD_DELETE, DO_FLD_RENAME, DO_FLD_MOVE, DO_FIND, DO_KEYS, DO_CMDLINE };
+       DO_FLD_CREATE, DO_FLD_DELETE, DO_FLD_RENAME, DO_FLD_MOVE, DO_ACC_EXPORT, DO_ACC_IMPORT, DO_FIND, DO_KEYS, DO_CMDLINE };
 
 typedef struct {
 	const char *label;
@@ -26,8 +26,8 @@ static const mitem M_MCM[] = {
 	{"Config", 0, 'c'}, {"Quit", 0, 'q'},
 };
 static const mitem M_ACC[] = {
-	{"Add", 0, DO_ACC_ADD}, {"edIt", 2, DO_ACC_EDIT}, {"rEmove", 1, DO_ACC_REMOVE},
-	{"select", -1, DO_ACC_SELECT},
+	{"Add", 0, DO_ACC_ADD}, {"edIt", 2, DO_ACC_EDIT}, {"export", -1, DO_ACC_EXPORT},
+	{"import", -1, DO_ACC_IMPORT}, {"rEmove", 1, DO_ACC_REMOVE}, {"select", -1, DO_ACC_SELECT},
 };
 static const mitem M_FLD[] = {
 	{"creaTe", 4, DO_FLD_CREATE}, {"Delete", 0, DO_FLD_DELETE}, {"moVe", 2, DO_FLD_MOVE},
@@ -168,6 +168,8 @@ static int run(int act)
 	case DO_FLD_DELETE: folder_delete(); return 1;
 	case DO_FLD_RENAME: folder_rename(); return 1;
 	case DO_FLD_MOVE: folder_move(); return 1;
+	case DO_ACC_EXPORT: folder_export(); return 1;
+	case DO_ACC_IMPORT: folder_import(); return 1;
 	case DO_KEYS: show_help(); return 1;
 	case DO_CMDLINE: show_cmdline_help(); return 1;
 	case DO_FIND:

@@ -47,7 +47,7 @@ All messages in these screenshots are made-up examples.
 
 | | |
 |:---:|:---:|
-| [![Message list and message](screenshots/message-tall.png)](screenshots/message-tall.png)<br>Message list and message, with links and attachments (default theme) | [![Links and attachments](screenshots/links-attachments.png)](screenshots/links-attachments.png)<br>All links and attachments of a message (T) |
+| [![Message list and message](screenshots/message-tall.png)](screenshots/message-tall.png)<br>Message list and message, with links and attachments (default theme) | [![Links and attachments](screenshots/links-attachments.png)](screenshots/links-attachments.png)<br>All links and attachments of a message (K) |
 | [![The F1 menu](screenshots/menu.png)](screenshots/menu.png)<br>The F1 menu | [![Writing a reply](screenshots/editor-reply.png)](screenshots/editor-reply.png)<br>Writing a reply in the built-in editor |
 | [![Filter](screenshots/filter-amber.png)](screenshots/filter-amber.png)<br>Filtering the list (L), amber theme | [![Config](screenshots/config-dark.png)](screenshots/config-dark.png)<br>The Config menu, dark theme |
 
@@ -345,9 +345,9 @@ section:
 theme = default
 wrap_width = 72
 message_wrap = 1
-folders_width = 25
+folders_width = 0
 list_width = 45
-accounts_width = 15
+accounts_width = 0
 editor = nano
 pdf_viewer = zathura
 html_viewer = firefox --new-tab
@@ -390,30 +390,49 @@ file from emsg 0.3 (the old name, without sections) is read as one account.
 
 ### Programs
 
-Three settings in `mcm.conf` choose the programs mcm starts. Empty (the
+Five settings in `mcm.conf` choose the programs mcm starts. Empty (the
 default) means the usual choice:
 
 | Setting | Used for | When empty |
 |---|---|---|
 | `editor` | `:e` in the message window (view the message) and in the mail editor (edit the text) | `vi` (Windows: Notepad) |
-| `pdf_viewer` | opening a PDF attachment (**T**, or **K** then Enter) | the desktop's program (`xdg-open`; Windows: the program Windows uses) |
+| `pdf_viewer` | opening a PDF attachment (**K** then Enter) | the desktop's program (`xdg-open`; Windows: the program Windows uses) |
 | `html_viewer` | opening an http, https or ftp link (**K**, or Enter on a link) | the desktop's browser (`xdg-open`) |
+| `pdf_viewer_console` | the same as `pdf_viewer`, without X or Wayland | the first installed of `fbpdf`, `jfbview`, `fbgs` (pages on the Linux framebuffer), else `pdftotext -layout %s - \| less` (the text only) |
+| `html_viewer_console` | the same as `html_viewer`, without X or Wayland | the first installed of `w3m`, `lynx`, `elinks`, `links`, `links2` |
+
+mcm chooses between the two by `$DISPLAY` and `$WAYLAND_DISPLAY`: when one
+of them is set there is a graphical desktop (also in a terminal window on
+it), otherwise mcm runs on a text console, over ssh or in a plain tty.
+`mcm --programs` shows which it finds and which programs it would use:
+
+```
+$ mcm --programs
+Environment: console, no X or Wayland (TERM=linux)
+Editor:      vi
+PDF:         pdftotext -layout %s - | less (default)
+Web links:   w3m (default)
+```
 
 `editor` is only used when the environment variables `$VISUAL` and
 `$EDITOR` are not set (for example in `~/.bashrc`): those come first.
-A command may have arguments; the file or link is added at the end:
+A command may have arguments; the file or link is added at the end, or
+put where `%s` is (the command is then a shell command line, so a pipe
+works):
 
 ```
 editor = nano -w
 pdf_viewer = evince
-html_viewer = w3m
+html_viewer = firefox --new-tab
+pdf_viewer_console = pdftotext -layout %s - | less
+html_viewer_console = w3m
 ```
 
 Console programs (w3m, lynx, links, elinks, browsh, less, vi, vim, nano and
 a few more) run in the terminal: mcm steps aside and comes back when they
 end. Other programs are started next to mcm, which keeps running; without
-a graphical desktop (no `$DISPLAY` or `$WAYLAND_DISPLAY`) every program runs
-in the terminal. `mailto:` links always go to the desktop's mail program.
+a graphical desktop every program runs in the terminal, `xdg-open` for
+other attachments too. `mailto:` links always go to the desktop's mail program.
 HTML attachments are still never opened (scripts in them would run), only
 saved.
 
@@ -478,6 +497,21 @@ There are four windows: **Accounts**, **Folders**, the **email list** and the
   `TAB=` hint; ← and → walk through all four.
 - A window left of the message is never narrower than 25 columns.
 
+The date in the email list depends on the number of windows:
+
+| Windows | Today | Before today |
+|---|---|---|
+| two (up to 150 columns) | `14:25` | `Nov18` |
+| three or four (over 150 columns) | `Thu 2026Nov19 14:25` | `Wed 2026Nov18 09:10` |
+
+Days and months are always in English, so the column keeps the same width
+in every language.
+
+The **Accounts** window is 25 columns wide and the **Folders** window a
+quarter of the screen, but at most 35 columns, unless you change them
+(Ctrl-← / Ctrl-→ or dragging a border). In `mcm.conf` that default is
+`accounts_width = 0` and `folders_width = 0`.
+
 The **Accounts** window lists every account (the current one marked `>` and
 in bold) with where its mail is, and *New account ...* at the end. Enter or
 a double click on the current account shows its folders; on another account
@@ -496,9 +530,11 @@ it follows the mouse while the button is held. (Only during such a drag does
 mcm ask the terminal for mouse movement, xterm mode 1002; otherwise it
 receives clicks only.) The widths are kept in `mcm.conf` as percentages, so
 they also fit after the terminal is resized: `folders_width` is the folder
-window's share of the screen, `list_width` the email list's share of the
+window's share of the screen (0, the default: 25 %, at most 35 columns;
+25 from an older mcm counts as 0), `list_width` the email list's share of the
 screen (with three or four columns: of what the windows left of it leave),
-and `accounts_width` the Accounts window's share in the four-column layout.
+and `accounts_width` the Accounts window's share (0, the default: 25
+columns; 15 from an older mcm counts as 0).
 
 | Key | Action |
 |---|---|
@@ -521,8 +557,8 @@ and `accounts_width` the Accounts window's share in the four-column layout.
 | X | toggle hex dump of the raw message |
 | S | save the message as a text file (see below) |
 | P | print the message (`lp`; on Windows Notepad prints it) |
-| T | attachments: list them, open or save one (see below); an email with attachments has `@` in the list, and T on the message border is inverted |
-| K, or Enter / a number in the message window | the message's links and attachments: choose one, Enter opens the link in your browser, or opens / saves the attachment (see below) |
+| T | the plain-text version of the email exactly as the sender wrote it, instead of mcm's choice (see *HTML and Markdown messages*); inverted on the message border while on, off again when you open another email |
+| K, or Enter / a number in the message window | the message's links and attachments: choose one, Enter opens the link in your browser, or opens / saves the attachment (see below); K on the message border is inverted when the email has links or attachments, and an email with attachments has `@` in the list |
 | ↑ / ↓ | in the message window: to the previous / next link or attachment on the screen (underlined; the chosen one between `>` and `<`), else scroll a line; Enter opens the link or asks Open / Save for the attachment, Esc leaves it; a mouse click on one does the same |
 | L | filter the email list (see *Filter*) |
 | → | from the email list: to the message window |
@@ -541,8 +577,8 @@ The bottom border of the list and the message window shows their paging keys.
 The list's bottom border starts with **L** (the filter, inverted while it is
 on), **O** (the selected messages, inverted while there are any) and, while
 the last copy or move can be undone, **U**. An email with an attachment has **@** after its N/A flag in the list. The message window's bottom border starts with **H W X S P T K**: all headers,
-wrapped lines, hex dump, save, print, attachments, links; H, W and X are inverted while their mode
-is on, T while the open email has attachments, and a click on a letter works like the key. Pressing W also turns H and
+wrapped lines, hex dump, save, print, plain text, links and attachments; H, W, X and T are inverted while their mode
+is on, K while the open email has links or attachments, and a click on a letter works like the key. Pressing W also turns H and
 X off, back to the message text. With W on (the default, kept in `mcm.conf` as
 `message_wrap`) long lines are wrapped at the window's width, at most 76
 columns. With W off lines are shown whole: ← and → move the text sideways and
@@ -561,8 +597,9 @@ opens it with that link chosen: `12` Enter opens link 12.
 
 The same window lists the message's attachments after the links, numbered on
 from the last link (`[3] Attachment: report.pdf  (application/pdf, 120 kB)`).
-Choosing one asks **Open** or **Save**, as with **T**: Open shows it in the
-desktop's program for that kind of file, Save puts it in `~/Downloads`.
+Choosing one asks **Open** or **Save**: Open shows it in the desktop's
+program for that kind of file, Save puts it in `~/Downloads` (see
+*Attachments* below).
 
 You can also choose a link in the text itself. Every link that can be
 chosen is underlined, as under a mouse pointer. In the message window
@@ -595,7 +632,7 @@ is never overwritten (`-2`, `-3` is added). The file is readable by you only
 same text to the printer with `lp` (CUPS); on Windows Notepad prints it on the
 default printer.
 
-**T** lists the open message's attachments (name, type, size). Names are
+The attachments in the **K** window show name, type and size. Names are
 decoded in both encodings mail programs use for names that are not plain
 ASCII: RFC 2047 (`=?UTF-8?B?...?=`) and RFC 2231 (`filename*=UTF-8''%C3%A9...`,
 also split in parts as `filename*0*`, `filename*1`, ...). Choose one with
@@ -663,10 +700,10 @@ window under the menu bar, with every command in six columns:
 │ ───      ───────   ───────   ─────────   ─────    ────           │
 │ Config   Add       creaTe    fiLter      / find   about          │
 │ Quit     edIt      Delete    Other       Fwd      command line   │
-│          rEmove    moVe                  Header   key list       │
-│          select    reName                heX                     │
-│                    select                Mail                    │
-│                                          Print                   │
+│          export    moVe                  Header   key list       │
+│          import    reName                heX                     │
+│          rEmove    select                Mail                    │
+│          select                          Print                   │
 │                                          Reply                   │
 │                                          Save                    │
 │                                          Wrap                    │
@@ -682,7 +719,7 @@ window under the menu bar, with every command in six columns:
 ← and → (or Tab) choose the column, ↑ and ↓ the item, and Enter runs it.
 The highlighted letter (the capital, or `/` for find) runs its item straight
 away from any column, so each letter is used only once. Items in lower case
-(select, and the Help column) have no letter: choose them with the arrows. In
+(select, export, import and the Help column) have no letter: choose them with the arrows. In
 the Email and Emaillist columns the letters are the main screen's keys. A
 click on an item runs it, and a click outside the window closes it, as do
 Esc, F1 and F10. The menu opens again on the column you used last.
@@ -694,6 +731,11 @@ code, so mcm cannot tell them apart.
 - **Account**:
   - Add (A): a new account.
   - edIt (I): the open account's name, full name and stored password.
+  - export: writes every folder of the account, or only the folder under the
+    cursor in the folders window, into a new Maildir (see
+    [Export and import](#export-and-import)).
+  - import: copies a Maildir, mbox file or MH folder (or a directory of
+    them) into a new folder `Imported-DATE` of the account.
   - rEmove (E): forget another account, with its settings and stored passwords.
     Its mail stays on the server or on disk, and the open account cannot be
     removed.
@@ -719,6 +761,59 @@ code, so mcm cannot tell them apart.
   - Fwd (F), Header (H), heX (X), Mail (M), Print (P), Reply (R), Save (S),
     Wrap (W).
 - **Help**: about; command line (the text of `mcm --help`); key list (also ? on the main screen).
+
+### Export and import
+
+**Account > export** saves mail in a Maildir, the format Dovecot, mutt,
+Thunderbird (with an add-on) and many other programs read:
+
+- **All folders** or **This folder** (the one under the cursor in the
+  folders window).
+- mcm asks for a directory, `~/mcm-export-DATE` by default. It must be new,
+  or an empty directory. mcm refuses a place inside an existing Maildir or
+  inside the mail of a local account, so mail that is already there is never
+  changed.
+- INBOX goes in the Maildir itself, the other folders become Maildir++
+  subfolders (`.Archive`, `.Archive.2025`; names with other than ASCII
+  characters in modified UTF-7, as Dovecot writes them). Read, answered,
+  flagged and deleted marks are kept in the file names, and each file gets
+  the date of its message.
+- Sent, Drafts and Deleted Items of a local account are left out until
+  they exist (mcm lists them before the first message is saved there).
+
+**Account > import** reads what a local account can read: a Maildir (with
+Maildir++ subfolders), an mbox file, an MH folder, or a directory of them.
+Everything goes into one new folder of the open account,
+`Imported-2026-11-21` (`-2`, `-3` when that exists), with the folders below
+it as they were: `Imported-2026-11-21/INBOX`, `Imported-2026-11-21/Archive/2025`.
+Read, answered and flagged marks are kept; messages are never marked deleted.
+The source is only read.
+
+The structure cannot always be kept, and mcm warns when that happens:
+
+- In a directory of Maildirs or mbox files, a folder cannot hold both
+  messages and subfolders. Such a subfolder gets a flat name inside the new
+  folder (`Imported-2026-11-21/Archive - 2025`), and mcm lists those at the end.
+- When the account cannot have folders inside folders at all, mcm asks first
+  and then imports with flat names at the top (`Imported-2026-11-21 - Archive - 2025`).
+- A local account that is a single mbox file, and a POP3 account, cannot get
+  new folders: mcm says so and imports nothing.
+
+The same from the command line, without the menu: mcm logs in as usual (it
+asks for the password when it is not stored), does the work with the
+progress window, prints what it did and quits. The exit code is 0 when all
+went well, 1 on an error, 2 for a wrong command line. `--export` always
+takes every folder; the two cannot be used together.
+
+```
+mcm -a Work --export ~/backup/work-2026-11-21
+mcm -a Home --import ~/old-mail/Maildir
+mcm --import=~/mcm.mbox ~/Mail
+```
+
+A folder name with the account's separator in it (`/`, or `.` on some
+servers) gets `_` in its place. Both take a while for large mailboxes; a
+window shows how far it is, and Esc stops (what was copied so far stays).
 
 ### Commands in the message window
 
@@ -922,7 +1017,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.993 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.994 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -970,7 +1065,11 @@ IMAP.
 Messages are shown as text. When a message has a plain-text version, that one
 is shown; otherwise its HTML is converted. A plain-text version that is empty
 (some newsletters send one, with all the text in the HTML) counts as missing,
-so the HTML is shown:
+and so do one that is really an HTML page (it starts with `<!DOCTYPE html`
+or `<html`) and one full of CSS (three or more rules like
+`body{margin:0}` or `body { margin: 0; }` left in it), mistakes some newsletters make: then the HTML
+is shown. **T** shows the plain-text version anyway, exactly as sent. The
+HTML is shown as text:
 
 - headings: the first level underlined with `=`, the second with `-`;
 - paragraphs, line breaks, bullet lists and numbered lists (indented when
@@ -981,13 +1080,24 @@ so the HTML is shown:
 - data tables in aligned columns; layout tables (nested, one cell per row) as
   their text;
 - `<style>`, `<script>` and the `<head>` are left out; `&euro;`, `&#8364;` and
-  the other character references become the characters.
+  the other character references become the characters;
+- at most one empty line in a row, none at the start.
 
 Markdown (`text/markdown`) is shown as the text it is, without the characters
 that only mark style: `**bold**`, `*italic*` and `` `code` `` lose their
 markers, `# Heading` is underlined, links become `text [1]` with the list at
 the end, and code blocks are kept as written (indented). Lists and quotes stay
 as they are.
+
+Characters that show nothing are left out of every message: the zero-width
+space and non-joiner, the combining grapheme joiner, the soft hyphen and the
+byte order mark (the zero-width joiner stays, it builds emoji like 👨‍👩‍👧).
+Wide spaces such as the figure space (`&#8199;`) count as ordinary spaces.
+Newsletters put long rows of them after the preview text. In a plain-text
+version they are often written as HTML codes copied from the HTML version
+(`&#8204;&nbsp;&#8204;&nbsp;...`); mcm leaves those codes out too, with the
+`&nbsp;` between them, but keeps other codes such as `&amp;` in plain text
+as written.
 
 ## Memory use
 
@@ -1056,7 +1166,11 @@ a number 0–255 or `#RRGGBB`. An `#RRGGBB` color (and `darkblue`) is shown exac
 color 17, #00005f). With `TERM=xterm-256color` and `COLORTERM=truecolor` (or `24bit`), as
 GNOME Terminal, Konsole and most modern terminals set, mcm uses the `xterm-direct`
 terminal description to send 24-bit colors; set `MCM_NO_DIRECT=1` to prevent that.
-Included:
+Included (the themes ending in `-256color` use `#RRGGBB` colors and need
+a terminal with at least 256 colors; the others use the 16 basic colors, so
+they follow the terminal's own palette). The older names `amber`, `green`,
+`night`, `eink` and `paper` still work: when no `NAME.theme` exists, mcm uses
+`NAME-256color`.
 
 | Theme | Colors |
 |---|---|
@@ -1064,11 +1178,11 @@ Included:
 | `mc` | Midnight Commander style: light gray on blue |
 | `dark` | light gray on black, blue selection bar |
 | `mono` | the terminal's own colors |
-| `eink` | black on white with grays only, for e-ink screens |
-| `night` | dark red on black, for a dark room (no blue or white light) |
-| `amber` | amber monochrome monitor |
-| `green` | green phosphor monochrome monitor |
-| `paper` | dark gray on warm off-white, blue selection bar |
+| `eink-256color` | black on white with grays only, for e-ink screens |
+| `night-256color` | dark red on black, for a dark room (no blue or white light) |
+| `amber-256color` | amber monochrome monitor |
+| `green-256color` | green phosphor monochrome monitor |
+| `paper-256color` | dark gray on warm off-white, blue selection bar |
 
 ## Windows
 
@@ -1325,11 +1439,12 @@ How it is done:
 | `src/folder.c` | the message list (cached header blocks), opening and refreshing folders, the filter |
 | `src/screen.c` | drawing the windows, column layout and borders, scroll bars, status line |
 | `src/msgwin.c` | the message window: wrapping, hex, `:` commands, save and print |
-| `src/attach.c` | attachments (T): open or save |
+| `src/attach.c` | attachments (in the K window): open or save |
 | `src/pick.c` | selected messages (Enter, Shift-Enter) and their window (O): copy, move, delete |
 | `src/keys.c` | keys of the main screen, mouse clicks in the windows, the help windows |
 | `src/menu.c` | the menu window (F1, F10) |
 | `src/fldops.c` | Folders > Create, Delete, Rename, Move |
+| `src/xfer.c` | Account > export (to a new Maildir) and import (into a new folder), `--export`, `--import` |
 | `src/certs.c` | untrusted certificates and the always-accepted ones |
 | `src/account.c` | accounts, stored passwords, the Config menu, SMTP settings |
 | `src/send.c` | writing mail (new, reply, forward), sending it or keeping it as a draft |

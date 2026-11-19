@@ -1,8 +1,8 @@
 # Amber monochrome monitor
-BACKGROUND   = black
+BACKGROUND   = #000000
 TEXT         = #ffb000
 HIGHLIGHTBG  = #ffb000
-HIGHLIGHTTXT = black
+HIGHLIGHTTXT = #000000
 MENUBG       = #4d3500
 MENUTXT      = #ffb000
 HOTKEY       = #ffe080

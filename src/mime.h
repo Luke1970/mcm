@@ -55,6 +55,16 @@ char *mime_summary(const char *hdr, size_t len);
 /* Decode one body part (transfer encoding + charset) to UTF-8; HTML and
  * Markdown are turned into plain text (textconv.h). */
 enum { MIME_PLAIN, MIME_HTML, MIME_MARKDOWN };
+/* Does text s start (after blank lines) as an HTML page: <!DOCTYPE html or
+ * <html? (Some newsletters send one as their plain-text version.) */
+int mime_looks_like_html(const char *s, size_t n);
+/* A plain-text version not worth showing when there is HTML: an HTML page,
+ * or text with three or more CSS rules (sel{prop:value}) left in it. */
+int mime_plain_is_bad(const char *s, size_t n);
+/* T: render the plain-text version as sent (mime_render), not mcm's
+ * choice; does the message have a plain-text part T can show? */
+void mime_set_plain(int on);
+int  mime_has_plain(const char *raw, size_t len);
 char *mime_decode_text(const char *data, size_t len, int kind, const char *cte,
                        const char *charset, size_t *outlen);
 /* text/markdown or text/x-markdown */

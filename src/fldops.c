@@ -270,3 +270,10 @@ void folder_move(void)
 	free(idx);
 	free(show);
 }
+
+/* For xfer.c (export, import): the separator, the INBOX prefix and the
+ * name conversions of this account. */
+char fld_delim(void) { return delim(); }
+void fld_prefix(char *out, size_t n) { prefix(out, n); }
+char *fld_shown(const char *raw) { return shown(raw); }
+char *fld_stored(const char *typed) { return stored(typed); }

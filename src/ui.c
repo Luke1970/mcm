@@ -978,6 +978,27 @@ int ui_run_editor(const char *path, int readonly)
 /* Run the command cmd (it may have arguments) with flag and path after it,
  * in the terminal, curses put aside meanwhile; waits for it. Returns its
  * exit status, -1 when it could not run. */
+/* The sh -c script that runs cmd on the file "$1" ($0 is cmd, $2 flag):
+ * cmd may contain arguments, which the shell splits; when it contains %s,
+ * it is a shell command line (pipes allowed) with "$1" for each %s. */
+void viewer_script(char *out, size_t n, const char *cmd, const char *flag)
+{
+	(void)flag;
+	if (!strstr(cmd, "%s")) {
+		snprintf(out, n, "exec $0 $2 \"$1\"");
+		return;
+	}
+	size_t o = 0;
+	for (const char *c = cmd; *c && o + 5 < n; c++) {
+		if (c[0] == '%' && c[1] == 's') {
+			memcpy(out + o, "\"$1\"", 4);
+			o += 4;
+			c++;
+		} else out[o++] = *c;
+	}
+	out[o] = 0;
+}
+
 int ui_run_program(const char *ed, const char *path, const char *flag)
 {
 	def_prog_mode();
@@ -1000,8 +1021,9 @@ int ui_run_program(const char *ed, const char *path, const char *flag)
 	pid_t pid = fork();
 	if (pid == 0) {
 		signal(SIGINT, SIG_DFL);
-		/* $EDITOR may contain arguments, so let the shell split it */
-		execl("/bin/sh", "sh", "-c", "exec $0 $2 \"$1\"", ed, path, flag, (char *)NULL);
+		char script[1100];
+		viewer_script(script, sizeof script, ed, flag);
+		execl("/bin/sh", "sh", "-c", script, ed, path, flag, (char *)NULL);
 		_exit(127);
 	}
 	int st = 0;

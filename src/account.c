@@ -351,6 +351,15 @@ void load_theme(theme_t *t, char *msg, size_t n)
 	int created = 0;
 	char *tp = theme_user_file(A.theme, &created);
 	if (!tp) tp = theme_find(A.theme);
+	if (!tp && !strchr(A.theme, '/') && !strstr(A.theme, ".theme")) {
+		/* amber, green, night, eink, paper: called NAME-256color since 0.994 */
+		char alt[sizeof A.theme];
+		if (snprintf(alt, sizeof alt, "%s-256color", A.theme) < (int)sizeof alt) {
+			tp = theme_user_file(alt, &created);
+			if (!tp) tp = theme_find(alt);
+			if (tp) snprintf(A.theme, sizeof A.theme, "%s", alt);
+		}
+	}
 	if (!tp)
 		snprintf(msg, n, "theme '%s' not found, using built-in colors", A.theme);
 	else if (theme_load(t, tp, msg, n) == 0 && created)

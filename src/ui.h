@@ -109,6 +109,7 @@ const char *ui_editor_cmd(void);   /* $VISUAL, $EDITOR, mcm.conf editor, vi */
 extern char cfg_editor[256];
 /* Run command cmd (with arguments) on path in the terminal, waiting for
  * it; flag goes before path. Its exit status, -1 when it could not run. */
+void viewer_script(char *out, size_t n, const char *cmd, const char *flag);
 int  ui_run_program(const char *cmd, const char *path, const char *flag);       /* editor in mcm.conf (empty: none) */
 
 /* Pick a file: folders open, a file is chosen (its full path, malloc'd);

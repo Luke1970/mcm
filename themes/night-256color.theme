@@ -1,9 +1,10 @@
 # Night: dark red on black for a dark room; no blue or white light, so the
-# eyes stay used to the dark. Dim the screen as well.
-BACKGROUND   = black
+# eyes stay used to the dark. Dim the screen as well. #000000 rather than
+# black: black is the terminal's own color 0, often dark gray.
+BACKGROUND   = #000000
 TEXT         = #870000
 HIGHLIGHTBG  = #870000
-HIGHLIGHTTXT = black
+HIGHLIGHTTXT = #000000
 MENUBG       = #3a0000
 MENUTXT      = #af0000
 HOTKEY       = #d70000

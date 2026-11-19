@@ -1,4 +1,5 @@
 # Short usage, printed after a wrong option. Edit it, then run make.
 usage: mcm [-a account | -n] [-s server] [-p port] [-u user] [-t theme] [-f WHERE]
       mcm [options] WHERE
+      mcm [options] --export DIR | --import PATH
 Try 'mcm --help' for the mail types, examples and keys.

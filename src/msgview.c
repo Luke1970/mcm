@@ -1,6 +1,7 @@
 /* msgview.c - an open message, loaded piece by piece from the server */
 #include "msgview.h"
 #include "mime.h"
+#include "textconv.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -61,6 +62,29 @@ static mv_leaf *find_leaf(msgview_t *mv, const mpart_t *p)
 	return NULL;
 }
 
+/* The message as one text: the header block and what was fetched of the
+ * body (the fallback leaf l). */
+static void whole_message(const msgview_t *mv, const mv_leaf *l, buf_t *msg)
+{
+	buf_add(msg, mv->hdr, mv->hlen);
+	/* the header block normally ends in its blank line already */
+	if (!(mv->hlen >= 2 && mv->hdr[mv->hlen - 1] == '\n' &&
+	      (mv->hdr[mv->hlen - 2] == '\n' ||
+	       (mv->hlen >= 3 && mv->hdr[mv->hlen - 2] == '\r' && mv->hdr[mv->hlen - 3] == '\n'))))
+		buf_adds(msg, "\r\n");
+	buf_add(msg, l->raw.d ? l->raw.d : "", l->raw.len);
+}
+
+/* Does the whole message (fallback leaf l) have a plain-text part? */
+static int hdr_plain(const msgview_t *mv, const mv_leaf *l)
+{
+	buf_t msg = {0};
+	whole_message(mv, l, &msg);
+	int r = mime_has_plain(msg.d, msg.len);
+	buf_free(&msg);
+	return r;
+}
+
 static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 {
 	mv_leaf *l = find_leaf(mv, p);
@@ -73,14 +97,10 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 		free(ct);
 		/* whole body as one blob: let the raw parser handle it */
 		buf_t msg = {0};
-		buf_add(&msg, mv->hdr, mv->hlen);
-		/* the header block normally ends in its blank line already */
-		if (!(mv->hlen >= 2 && mv->hdr[mv->hlen - 1] == '\n' &&
-		      (mv->hdr[mv->hlen - 2] == '\n' ||
-		       (mv->hlen >= 3 && mv->hdr[mv->hlen - 2] == '\r' && mv->hdr[mv->hlen - 3] == '\n'))))
-			buf_adds(&msg, "\r\n");
-		buf_add(&msg, data, l->raw.len);
+		whole_message(mv, l, &msg);
+		mime_set_plain(mv->plain);               /* T */
 		char *t = mime_render(msg.d, msg.len, 0);
+		mime_set_plain(0);
 		/* mime_render prints its own header summary; skip it */
 		char *body = strstr(t, "\n\n");
 		buf_adds(out, body ? body + 2 : t);
@@ -102,6 +122,13 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 			t = u;
 			mv->flowed = 1;
 		}
+		if (kind == MIME_PLAIN && !mv->plain) {   /* &#8204; and the like (mime.c does HTML); T: as sent */
+			buf_t v = {0};
+			strip_invisible(t, n, 1, &v);
+			free(t);
+			n = v.len;
+			t = v.d ? buf_steal(&v) : xstrdup("");
+		}
 		add_clean(out, t, n);
 		free(t);
 	}
@@ -121,8 +148,10 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 
 /* The part of a multipart/alternative that is shown: the plain text, but
  * not an empty one (some newsletters send one, with all the text in the
- * HTML part) when there is HTML; else HTML, a multipart, the first. */
-static int alt_pick(const mpart_t *p)
+ * HTML part) or one that turned out to be an HTML page or full of CSS
+ * (html_inside, see mv_repick) when there is HTML; else HTML, a multipart,
+ * the first. mv->plain (T): the plain text whenever there is one. */
+static int alt_pick(const msgview_t *mv, const mpart_t *p)
 {
 	int pick = -1, html = -1, multi = -1;
 	for (int i = 0; i < p->nkids; i++) {
@@ -131,7 +160,9 @@ static int alt_pick(const mpart_t *p)
 		else if (is(k, "text", "html") && html < 0) html = i;
 		else if (is(k, "multipart", NULL) && multi < 0) multi = i;
 	}
-	if (pick >= 0 && p->kids[pick].size <= EMPTY_PART && html >= 0) pick = html;
+	if (pick >= 0 && !mv->plain && (p->kids[pick].size <= EMPTY_PART || p->kids[pick].html_inside) &&
+	    html >= 0)
+		pick = html;
 	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
 	return pick;
 }
@@ -142,7 +173,7 @@ static void walk(msgview_t *mv, mpart_t *p, buf_t *out)
 	if (is(p, "multipart", NULL)) {
 		if (!p->nkids) return;
 		if (is(p, "multipart", "alternative")) {
-			walk(mv, &p->kids[alt_pick(p)], out);
+			walk(mv, &p->kids[alt_pick(mv, p)], out);
 		} else {
 			for (int i = 0; i < p->nkids; i++) {
 				if (out && i) ensure_para(out);
@@ -195,6 +226,82 @@ static int fetch_blocks(msgview_t *mv, store_t *im, mv_leaf **ls, int n)
 	return rc;
 }
 
+/* Walk the structure again (after html_inside or mv->plain changed) and
+ * fetch the parts that are new; the ones fetched already are kept. */
+static int rewalk(msgview_t *mv, store_t *im)
+{
+	mv_leaf *old = mv->leaves;
+	int nold = mv->nleaves;
+	mv->leaves = NULL;
+	mv->nleaves = 0;
+	walk(mv, mv->root, NULL);
+	mv_leaf **ls = xcalloc((size_t)mv->nleaves + 1, sizeof *ls);
+	int n = 0;
+	for (int i = 0; i < mv->nleaves; i++) {
+		mv_leaf *l = &mv->leaves[i];
+		for (int k = 0; k < nold; k++)          /* fetched already: keep it */
+			if (old[k].part == l->part) {
+				*l = old[k];
+				old[k].raw = (buf_t){0};
+			}
+		if (l->part->size == 0) l->done = 1;
+		else if (!l->done && !l->raw.len) ls[n++] = l;
+	}
+	for (int k = 0; k < nold; k++) buf_free(&old[k].raw);
+	free(old);
+	int rc = fetch_blocks(mv, im, ls, n);
+	free(ls);
+	return rc;
+}
+
+/* A plain-text part that is an HTML page or full of CSS: show the HTML
+ * part of its multipart/alternative instead (unless T asks for the plain
+ * text). Checked on what was fetched of each plain leaf. */
+int mv_repick(msgview_t *mv, store_t *im)
+{
+	if (!mv->root) return 0;
+	int again = mv->plain_changed;
+	mv->plain_changed = 0;
+	for (int i = 0; !mv->plain && i < mv->nleaves; i++) {
+		mv_leaf *l = &mv->leaves[i];
+		if (!is(l->part, "text", "plain") || !l->raw.len || l->part->html_inside) continue;
+		size_t dn;
+		char *t = mime_decode_text(l->raw.d, l->raw.len, MIME_PLAIN, l->part->cte, l->part->charset, &dn);
+		if (mime_plain_is_bad(t, dn)) {
+			l->part->html_inside = 1;
+			again = 1;
+		}
+		free(t);
+	}
+	return again ? rewalk(mv, im) : 0;
+}
+
+/* Is there a plain-text part that T can show (in a multipart/alternative,
+ * or the message itself)? */
+static int has_plain(const mpart_t *p)
+{
+	if (is(p, "text", "plain") && !p->attachment) return 1;
+	if (!is(p, "multipart", NULL)) return 0;
+	for (int i = 0; i < p->nkids; i++)
+		if (has_plain(&p->kids[i])) return 1;
+	return 0;
+}
+
+int mv_set_plain(msgview_t *mv, store_t *im, int on)
+{
+	if (!mv->root) {                         /* the whole message: mime_render */
+		mv_leaf *l = find_leaf(mv, &mv->fallback);
+		if (on && !(l && hdr_plain(mv, l))) return 1;
+		mv->plain = on;
+		return 0;
+	}
+	if (on && !has_plain(mv->root)) return 1;
+	if (mv->plain == on) return 0;
+	mv->plain = on;
+	mv->plain_changed = 1;
+	return mv_repick(mv, im) == 0 ? 0 : -1;
+}
+
 int mv_open(msgview_t *mv, store_t *im, uint32_t uid, uint32_t size)
 {
 	memset(mv, 0, sizeof *mv);
@@ -225,6 +332,8 @@ int mv_open(msgview_t *mv, store_t *im, uint32_t uid, uint32_t size)
 	}
 	int rc = fetch_blocks(mv, im, ls, n);
 	free(ls);
+
+	if (rc == 0) rc = mv_repick(mv, im);
 	mv->open = 1;
 	if (rc != 0) {
 		mv_close(mv);
@@ -239,7 +348,7 @@ static void walk_atts(msgview_t *mv, mpart_t *p, mpart_t ***out, int *n)
 	if (is(p, "multipart", NULL)) {
 		if (!p->nkids) return;
 		if (is(p, "multipart", "alternative")) {
-			walk_atts(mv, &p->kids[alt_pick(p)], out, n);
+			walk_atts(mv, &p->kids[alt_pick(mv, p)], out, n);
 		} else {
 			for (int i = 0; i < p->nkids; i++) walk_atts(mv, &p->kids[i], out, n);
 		}

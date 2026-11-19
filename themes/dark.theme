@@ -1,5 +1,5 @@
 # Dark terminal theme
-BACKGROUND   = black
+BACKGROUND   = #000000
 TEXT         = lightgray
 HIGHLIGHTBG  = blue
 HIGHLIGHTTXT = brightwhite

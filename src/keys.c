@@ -156,7 +156,7 @@ int handle_key(int ch)
 		return 1;
 	case 's': case 'S': save_message(0); return 1;
 	case 'p': case 'P': save_message(1); return 1;
-	case 't': case 'T': attachments(); return 1;
+	case 't': case 'T': msg_toggle_plain(); return 1;
 	case 'k': case 'K': links_window(0); return 1;
 	case 'm': case 'M': compose_start('m'); return 1;
 	case 'r': case 'R': compose_start('r'); return 1;

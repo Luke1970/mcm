@@ -212,7 +212,7 @@ static int console_program(const char *cmd)
 {
 	static const char *const tui[] = {"w3m", "lynx", "links", "links2", "elinks", "browsh",
 		"carbonyl", "less", "more", "most", "vi", "vim", "nvim", "view", "nano", "mc",
-		"mcview", "fbpdf", "fbgs", "jfbview", NULL};
+		"mcview", "fbpdf", "fbgs", "jfbview", "pdftotext", NULL};
 	const char *name = cmd, *sp = cmd + strcspn(cmd, " \t");
 	for (const char *c = cmd; c < sp; c++)
 		if (*c == '/' || *c == '\\') name = c + 1;
@@ -221,17 +221,75 @@ static int console_program(const char *cmd)
 		if (strlen(tui[i]) == nl && !strncmp(name, tui[i], nl)) return 1;
 	return 0;
 }
+
+/* name (no arguments) is a program in $PATH. */
+static int in_path(const char *name)
+{
+	const char *p = getenv("PATH");
+	if (!p || !*p) p = "/usr/bin:/bin";
+	while (*p) {
+		size_t n = strcspn(p, ":");
+		char f[1024];
+		if (n && snprintf(f, sizeof f, "%.*s/%s", (int)n, p, name) < (int)sizeof f &&
+		    access(f, X_OK) == 0)
+			return 1;
+		p += n;
+		if (*p) p++;
+	}
+	return 0;
+}
 #endif
 
+/* A graphical desktop (X or Wayland) mcm can open windows on: always on
+ * Windows. */
+int graphical(void)
+{
+#ifdef _WIN32
+	return 1;
+#else
+	const char *x = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
+	return (x && *x) || (w && *w);
+#endif
+}
+
+/* The program used for kind ('p' PDF, 'h' web link) here: the setting
+ * from mcm.conf for a graphical desktop or the console, otherwise on the
+ * console the first one installed. "" means the desktop's program
+ * (xdg-open, Windows: ShellExecute); NULL: none found. */
+const char *viewer_for(int kind)
+{
+	int g = graphical();
+	const char *set = kind == 'p' ? (g ? cfg_pdf_viewer : cfg_pdf_viewer_console)
+	                              : (g ? cfg_html_viewer : cfg_html_viewer_console);
+	if (*set || g) return set;
+#ifdef _WIN32
+	return "";
+#else
+	/* framebuffer viewers show the pages (Linux console); pdftotext only
+	 * the text */
+	static const char *const pdf[] = {"fbpdf", "jfbview", "fbgs", NULL};
+	static const char *const web[] = {"w3m", "lynx", "elinks", "links", "links2", NULL};
+	const char *const *l = kind == 'p' ? pdf : web;
+	for (int i = 0; l[i]; i++)
+		if (in_path(l[i])) return l[i];
+	if (kind == 'p' && in_path("pdftotext") && in_path("less"))
+		return "pdftotext -layout %s - | less";
+	return NULL;
+#endif
+}
+
 /* Open path (a file or a link) with cmd from mcm.conf, which may have
- * arguments: path is added at the end. A console program (or any program
- * without a graphical desktop) runs in the terminal and mcm waits; others
- * are started and left running. */
+ * arguments: path is added at the end, or put where %s is (then cmd is a
+ * shell command line: pdftotext %s - | less). A console program (or any
+ * program without a graphical desktop) runs in the terminal and mcm waits;
+ * others are started and left running. */
 static int run_viewer(const char *cmd, const char *path)
 {
 #ifdef _WIN32
 	char cl[2200];
-	snprintf(cl, sizeof cl, "%s \"%s\"", cmd, path);
+	const char *ps = strstr(cmd, "%s");
+	if (ps) snprintf(cl, sizeof cl, "%.*s\"%s\"%s", (int)(ps - cmd), cmd, path, ps + 2);
+	else snprintf(cl, sizeof cl, "%s \"%s\"", cmd, path);
 	STARTUPINFOA si = {.cb = sizeof si};
 	PROCESS_INFORMATION pi;
 	if (!CreateProcessA(NULL, cl, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) return -1;
@@ -239,12 +297,13 @@ static int run_viewer(const char *cmd, const char *path)
 	CloseHandle(pi.hThread);
 	return 0;
 #else
-	const char *x = getenv("DISPLAY"), *w = getenv("WAYLAND_DISPLAY");
-	if (console_program(cmd) || ((!x || !*x) && (!w || !*w))) {
+	if (console_program(cmd) || !graphical()) {
 		int rc = ui_run_program(cmd, path, "");
 		clearok(curscr, TRUE);
 		return rc == 0 ? 0 : -1;
 	}
+	char script[1100];
+	viewer_script(script, sizeof script, cmd, "");
 	pid_t pid = fork();
 	if (pid < 0) return -1;
 	if (pid == 0) {
@@ -256,7 +315,7 @@ static int run_viewer(const char *cmd, const char *path)
 				dup2(fd, 1);
 				dup2(fd, 2);
 			}
-			execl("/bin/sh", "sh", "-c", "exec $0 \"$1\"", cmd, path, (char *)NULL);
+			execl("/bin/sh", "sh", "-c", script, cmd, path, "", (char *)NULL);
 			_exit(127);
 		}
 		_exit(0);
@@ -267,25 +326,45 @@ static int run_viewer(const char *cmd, const char *path)
 #endif
 }
 
-/* A web link (http, https, ftp) in html_viewer from mcm.conf, otherwise
+/* A web link (http, https, ftp) in the html viewer (viewer_for), otherwise
  * (and mailto:) as open_with_viewer. */
 int open_url(const char *url)
 {
-	if (*cfg_html_viewer && strncasecmp(url, "mailto:", 7)) return run_viewer(cfg_html_viewer, url);
+	if (strncasecmp(url, "mailto:", 7)) {
+		const char *v = viewer_for('h');
+		if (!v) {
+			set_status("No console web browser: set html_viewer_console in mcm.conf");
+			return 0;
+		}
+		if (*v) return run_viewer(v, url);
+	}
 	return open_with_viewer(url);
 }
 
 /* Show a file (or a URL) with the program the desktop uses for it (not
- * waited for); a PDF file with pdf_viewer from mcm.conf when set. */
+ * waited for); a PDF file with the pdf viewer (viewer_for). Without a
+ * graphical desktop xdg-open runs in the terminal (it may start a console
+ * program) and mcm waits. */
 int open_with_viewer(const char *path)
 {
 	size_t pl = strlen(path);
-	if (*cfg_pdf_viewer && pl > 4 && !strcasecmp(path + pl - 4, ".pdf"))
-		return run_viewer(cfg_pdf_viewer, path);
+	if (pl > 4 && !strcasecmp(path + pl - 4, ".pdf")) {
+		const char *v = viewer_for('p');
+		if (!v) {
+			set_status("No console PDF viewer: set pdf_viewer_console in mcm.conf");
+			return 0;
+		}
+		if (*v) return run_viewer(v, path);
+	}
 #ifdef _WIN32
 	HINSTANCE h = ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
 	return (INT_PTR)h > 32 ? 0 : -1;
 #else
+	if (!graphical()) {
+		int rc = ui_run_program("xdg-open", path, "");
+		clearok(curscr, TRUE);
+		return rc == 0 ? 0 : -1;
+	}
 	pid_t pid = fork();
 	if (pid < 0) return -1;
 	if (pid == 0) {
@@ -345,36 +424,6 @@ static char *att_item(const att_t *a)
 	buf_t b = {0};
 	buf_printf(&b, "%s  (%s, %s)", a->name, a->type, hs);
 	return buf_steal(&b);
-}
-
-/* T: list the open message's attachments; the chosen one is opened (in the
- * desktop's viewer) or saved in ~/Downloads. */
-void attachments(void)
-{
-	if (A.pending_load) load_selected();
-	if (!A.mv.open) {
-		set_status("%s", "No message is open");
-		return;
-	}
-	att_t *a;
-	int n = att_list(&a);
-	if (n < 0) return;
-	if (n == 0) {
-		set_status("%s", "This message has no attachments");
-		att_free(a, 0);
-		return;
-	}
-	char **items = xcalloc((size_t)n, sizeof *items);
-	for (int i = 0; i < n; i++) items[i] = att_item(&a[i]);
-	int sel = 0;
-	for (;;) {
-		sel = ui_list_dialog("Attachments", (const char *const *)items, n, sel,
-		                     "Enter: open or save   Esc: close", draw_bg);
-		if (sel < 0 || att_open_or_save(&a[sel], items[sel]) == 0) break;
-	}
-	for (int i = 0; i < n; i++) free(items[i]);
-	free(items);
-	att_free(a, n);
 }
 
 /* For the links window (K): the open message's attachments, kept until

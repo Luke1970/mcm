@@ -16,6 +16,11 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef _WIN32
+#include <sys/utime.h>
+#else
+#include <utime.h>
+#endif
 
 /* Maildir file names end in ":2,FLAGS"; on Windows "!2,FLAGS" (see compat.h) */
 #ifdef _WIN32
@@ -1869,14 +1874,19 @@ static int write_all(int fd, const char *p, size_t n)
 	return 0;
 }
 
-static int append_maildir(local_t *l, const char *path, const char *flags, const buf_t *msg)
+/* Write msg (LF line ends) into Maildir path as a new file in cur/ with
+ * the IMAP flags as Maildir flags; cur/ new/ tmp/ are made when missing.
+ * mtime > 0: the file gets that time (the message's date). *dst_out (when
+ * not NULL): the file written. -1: err says why. */
+static int md_write(const char *path, const char *flags, const buf_t *msg, time_t mtime,
+                    char **dst_out, char *err, size_t errn)
 {
 	static const char *const sub[] = {"", "/cur", "/new", "/tmp"};
 	for (int i = 0; i < 4; i++) {
 		buf_t d = {0};
 		buf_printf(&d, "%s%s", path, sub[i]);
 		if (mkdir(d.d, 0700) != 0 && errno != EEXIST) {
-			seterr(l, "cannot create %s: %s", d.d, strerror(errno));
+			snprintf(err, errn, "cannot create %s: %s", d.d, strerror(errno));
 			buf_free(&d);
 			return -1;
 		}
@@ -1899,6 +1909,7 @@ static int append_maildir(local_t *l, const char *path, const char *flags, const
 	if (flags && strstr(flags, "\\Flagged")) fl[k++] = 'F';
 	if (flags && strstr(flags, "\\Answered")) fl[k++] = 'R';
 	if (flags && strstr(flags, "\\Seen")) fl[k++] = 'S';
+	if (flags && strstr(flags, "\\Deleted")) fl[k++] = 'T';
 	buf_t base = {0}, tmp = {0}, dst = {0};
 	buf_printf(&base, "%lld.M%ldP%dQ%u.%s", (long long)ts.tv_sec, ts.tv_nsec / 1000, (int)getpid(),
 	           ++counter, host);
@@ -1907,16 +1918,19 @@ static int append_maildir(local_t *l, const char *path, const char *flags, const
 	int rc = -1;
 	int fd = open(tmp.d, O_WRONLY | O_CREAT | O_EXCL, 0600);
 	if (fd < 0) {
-		seterr(l, "cannot write %s: %s", tmp.d, strerror(errno));
+		snprintf(err, errn, "cannot write %s: %s", tmp.d, strerror(errno));
 	} else {
 		int ok = write_all(fd, msg->d, msg->len) == 0 && fsync(fd) == 0;
 		if (close(fd) != 0) ok = 0;
+		if (ok && mtime > 0) {
+			struct utimbuf ut = {.actime = mtime, .modtime = mtime};
+			utime(tmp.d, &ut);
+		}
 		if (ok && rename(tmp.d, dst.d) == 0) {
 			rc = 0;
-			free(l->wrote);
-			l->wrote = xstrdup(dst.d);
+			if (dst_out) *dst_out = buf_steal(&dst);
 		} else {
-			seterr(l, "cannot write %s: %s", tmp.d, strerror(errno));
+			snprintf(err, errn, "cannot write %s: %s", tmp.d, strerror(errno));
 			unlink(tmp.d);
 		}
 	}
@@ -1925,6 +1939,30 @@ static int append_maildir(local_t *l, const char *path, const char *flags, const
 	buf_free(&dst);
 	return rc;
 }
+
+static int append_maildir(local_t *l, const char *path, const char *flags, const buf_t *msg)
+{
+	char err[600], *dst = NULL;
+	if (md_write(path, flags, msg, 0, &dst, err, sizeof err) != 0) {
+		seterr(l, "%s", err);
+		return -1;
+	}
+	free(l->wrote);
+	l->wrote = dst;
+	return 0;
+}
+
+int local_maildir_write(const char *dir, const char *flags, const char *data, size_t len, time_t mtime,
+                        char *err, size_t errn)
+{
+	buf_t m = {0};
+	to_lf(&m, data, len);
+	int rc = md_write(dir, flags, &m, mtime, NULL, err, errn);
+	buf_free(&m);
+	return rc;
+}
+
+int local_is_maildir(const char *path) { return is_maildir(path); }
 
 static int append_mbox(local_t *l, const char *path, const char *flags, const buf_t *msg)
 {
@@ -2335,4 +2373,12 @@ int local_delete_folder(local_t *l, const char *name)
 	}
 	scan_folders(l);
 	return rc;
+}
+
+/* Is folder name there (not only listed, like Sent before the first
+ * message saved there)? */
+int local_folder_real(local_t *l, const char *name)
+{
+	const lfolder *f = find_folder(l, name);
+	return f && f->kind < LF_NEW_MAILDIR;
 }

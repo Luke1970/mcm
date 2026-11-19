@@ -1,13 +1,13 @@
 # E-ink: black on white, only grays, no colors. Bold marks the shortcut
 # letters; the selection bar is gray so a shortcut letter stays readable.
 BACKGROUND   = #ffffff
-TEXT         = black
+TEXT         = #000000
 HIGHLIGHTBG  = #b0b0b0
-HIGHLIGHTTXT = black
-MENUBG       = black
+HIGHLIGHTTXT = #000000
+MENUBG       = #000000
 MENUTXT      = #ffffff
 HOTKEY       = #ffffff
-TITLEBG      = black
+TITLEBG      = #000000
 TITLETXT     = #ffffff
 HEADERBG     = #e0e0e0
-HEADERTXT    = black
+HEADERTXT    = #000000

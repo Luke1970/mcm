@@ -14,6 +14,11 @@ static int line_at_off(size_t off);
 static void view_in_editor(void);
 static void write_message_to(const char *name, int force);
 static void search_message(const char *pat, int back);
+typedef struct {
+	int   num;
+	char *url;
+} link_t;
+static int collect_links(const char *t, size_t len, link_t **out);
 /* a link in the message text (see collect_stops) */
 typedef struct stop {
 	size_t off, len;        /* in A.mv.text */
@@ -284,17 +289,19 @@ static void draw_hex(int x, int y, int w, int rows)
 	}
 }
 
-/* Does the open message have attachments (T inverted)? Its structure
- * says so; without one (local mail) the list's @ does. */
+/* Does the open message have attachments or links (K inverted)? Its
+ * structure says which attachments; without one (local mail) the list's @
+ * does. Links: those in the text loaded so far. */
 static int open_has_att(void)
 {
 	static uint32_t uid;
 	static const void *root;
-	static int has;
+	static int has, plain;
 	if (!A.mv.open) return 0;
-	if (A.mv.uid == uid && A.mv.root == root) return has;
+	if (A.mv.uid == uid && A.mv.root == root && A.mv.plain == plain) return has;
 	uid = A.mv.uid;
 	root = A.mv.root;
+	plain = A.mv.plain;
 	mpart_t **v;
 	has = mv_attachments(&A.mv, &v) > 0;
 	free(v);
@@ -304,6 +311,45 @@ static int open_has_att(void)
 			if (m && m->uid == uid) { has = m->att; break; }
 		}
 	return has;
+}
+
+static int open_has_links(void)
+{
+	static uint32_t uid;
+	static size_t len;
+	static int has, plain;
+	if (!A.mv.open || !A.mv.text) return 0;
+	if (A.mv.uid == uid && A.mv.textlen == len && A.mv.plain == plain) return has;
+	uid = A.mv.uid;
+	len = A.mv.textlen;
+	plain = A.mv.plain;
+	size_t from = A.mv.hdr_end < A.mv.textlen ? A.mv.hdr_end : 0;
+	link_t *v;
+	int n = collect_links(A.mv.text + from, A.mv.textlen - from, &v);
+	for (int i = 0; i < n; i++) free(v[i].url);
+	free(v);
+	has = n > 0;
+	return has;
+}
+
+/* T: the message's plain-text version as sent, or mcm's choice again. */
+void msg_toggle_plain(void)
+{
+	if (A.pending_load) load_selected();
+	if (!A.mv.open) {
+		set_status("%s", "No message is open");
+		return;
+	}
+	int rc = mv_set_plain(&A.mv, A.im, !A.mv.plain);
+	if (rc == 1) {
+		set_status("%s", "This message has no plain-text version");
+		return;
+	}
+	if (rc < 0) set_status("Error: %s", store_error(A.im));
+	else set_status("%s", A.mv.plain ? "T: the plain-text version, as sent" : "");
+	A.vtop = 0;
+	A.hex = 0;
+	A.text_dirty = 1;
 }
 
 void draw_message(int x, int y, int w, int h, int focused)
@@ -336,12 +382,14 @@ void draw_message(int x, int y, int w, int h, int focused)
 	ui_box(y, x, h, w, CP_NORMAL, title, A_BOLD, focused ? CP_TITLE : CP_NORMAL);
 	draw_scrollbar(COL_MSG, x + w - 1, y + 1, rows, A.mv.open && !A.hex ? A.nlines : 0, &A.vtop);
 
-	/* bottom border: H (all headers), W (wrap), X (hex), inverted when on,
-	 * S (save), P (print), T (attachments), K (links); then a horizontal
-	 * scroll bar for long lines, or the paging hint */
+	/* bottom border: H (all headers), W (wrap), X (hex), T (plain text),
+	 * inverted when on, S (save), P (print), K (links and attachments,
+	 * inverted when there are any); then a horizontal scroll bar for long
+	 * lines, or the paging hint */
 	int by = y + h - 1, bx = x + 16;
 	if (w >= 20) {
-		const int on[7] = {A.show_headers, !A.nowrap, A.hex, 0, 0, open_has_att(), 0};
+		const int on[7] = {A.show_headers, !A.nowrap, A.hex, 0, 0, A.mv.open && A.mv.plain,
+		                   open_has_att() || open_has_links()};
 		for (int i = 0; i < 7; i++)
 			ui_puts(by, x + 2 + 2 * i, (const char[]){HWXSP[i], 0}, 1,
 			        A_BOLD | (on[i] ? A_REVERSE : 0), CP_NORMAL);
@@ -783,10 +831,6 @@ int msg_colon_with(const char *init)
 /* ------------------------------------------------------------------ */
 /* Links (K, Enter or a number in the message window)                  */
 
-typedef struct {
-	int   num;
-	char *url;
-} link_t;
 
 static int add_link(link_t **v, int *n, int num, const char *s, size_t len)
 {

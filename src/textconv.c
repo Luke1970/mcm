@@ -91,8 +91,8 @@ static void tidy(buf_t *out, size_t start)
 			while (w > start && out->d[w - 1] == ' ') w--;
 			if (nl >= 2) continue;
 			nl++;
-		} else {
-			nl = 0;
+		} else if (c != ' ') {
+			nl = 0;                          /* (a line of spaces is empty too) */
 		}
 		out->d[w++] = c;
 	}
@@ -604,7 +604,12 @@ void html_to_text(const char *s, size_t len, buf_t *out)
 {
 	links_t links = {0};
 	size_t start = out->len;
-	render_html(s, len, out, &links);
+	buf_t t = {0};
+	render_html(s, len, &t, &links);
+	/* invisible characters first, so that the lines left empty by them
+	 * count as empty: at most one empty line in a row (tidy) */
+	strip_invisible(t.d ? t.d : "", t.len, 0, out);
+	buf_free(&t);
 	ensure_nl(out);
 	links_out(&links, out);
 	tidy(out, start);
@@ -801,4 +806,83 @@ void md_to_text(const char *s, size_t len, buf_t *out)
 	links_out(&links, out);
 	tidy(out, start);
 	ensure_nl(out);
+}
+
+/* ------------------------------------------------------------------ */
+/* Invisible characters                                                */
+
+/* Characters that show nothing: zero-width space and non-joiner, word
+ * joiner, byte order mark, combining grapheme joiner, soft hyphen. (The
+ * zero-width joiner U+200D stays: it builds emoji such as 👨‍👩‍👧.) The
+ * Unicode spaces U+2000-200A (figure space &#8199; and the like), U+202F
+ * and U+205F become plain spaces. */
+static int invisible(uint32_t c)
+{
+	return c == 0x200B || c == 0x200C || c == 0x2060 || c == 0xFEFF || c == 0x034F || c == 0x00AD;
+}
+
+/* The same written as an HTML entity (&#8204; &#x200C; &zwnj; ...) in
+ * plain text: its length at s, or 0. */
+static size_t invisible_entity(const char *s, size_t len)
+{
+	static const char *const names[] = {"zwnj", "shy", "ZeroWidthSpace", "NoBreak", NULL};
+	if (len < 4 || s[0] != '&') return 0;
+	size_t j = 1;
+	while (j < len && j < 16 && s[j] != ';') j++;
+	if (j >= len || s[j] != ';') return 0;
+	if (s[1] == '#') {
+		char *end;
+		long cp = s[2] == 'x' || s[2] == 'X' ? strtol(s + 3, &end, 16) : strtol(s + 2, &end, 10);
+		return end == s + j && cp > 0 && invisible((uint32_t)cp) ? j + 1 : 0;
+	}
+	for (int i = 0; names[i]; i++)
+		if (strlen(names[i]) == j - 1 && !strncmp(s + 1, names[i], j - 1)) return j + 1;
+	return 0;
+}
+
+void strip_invisible(const char *s, size_t len, int entities, buf_t *out)
+{
+	/* gap: something was removed since the last visible character; the
+	 * spaces (and literal &nbsp;) around it then shrink to one, and none
+	 * are left at the end of the line */
+	int gap = 0;
+	size_t i = 0;
+	while (i < len) {
+		size_t n = entities ? invisible_entity(s + i, len - i) : 0;
+		if (!n && entities && gap && len - i >= 6 && !strncmp(s + i, "&nbsp;", 6)) n = 6;
+		int space = 0;                           /* a Unicode space, read as ' ' */
+		if (!n && (unsigned char)s[i] >= 0x80) {
+			size_t cl;
+			wchar_t c = utf8_next(s + i, len - i, &cl);
+			if (invisible((uint32_t)c)) n = cl;
+			else if (gap && c == 0xA0) n = cl;   /* no-break space between them */
+			else if ((c >= 0x2000 && c <= 0x200A) || c == 0x202F || c == 0x205F) space = (int)cl;
+		}
+		if (n) {
+			gap = 1;
+			i += n;
+			continue;
+		}
+		char c;
+		if (space) {
+			c = ' ';
+			i += (size_t)space;
+		} else {
+			c = s[i++];
+		}
+		if (gap && (c == ' ' || c == '\t')) {
+			if (out->len && out->d[out->len - 1] != ' ' && out->d[out->len - 1] != '\n') buf_addc(out, ' ');
+			continue;
+		}
+		if (c == '\n' || c == '\r') {
+			if (gap)
+				while (out->len && out->d[out->len - 1] == ' ') out->len--;
+			gap = 0;
+		} else {
+			gap = 0;
+		}
+		buf_addc(out, c);
+	}
+	if (gap)
+		while (out->len && out->d[out->len - 1] == ' ') out->len--;
 }

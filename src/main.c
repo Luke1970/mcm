@@ -15,7 +15,8 @@ char      *master_check;
 char      *master;
 int wrap_width = 72;
 char cfg_pdf_viewer[256], cfg_html_viewer[256];
-int col_pct[3] = {25, 45, 15};
+char cfg_pdf_viewer_console[256], cfg_html_viewer_console[256];
+int col_pct[3] = {0, 45, 0};   /* 0: folders 25 % up to 35 columns, accounts 25 columns */
 int dragging;
 int drag_border;
 sbar_t sbs[NSBS];
@@ -39,6 +40,7 @@ static int parse_url(const char *url);
 static void print_lines(FILE *f, const char *const *lines);
 static void quit_now(void);
 static void usage(void);
+static void programs(void);
 static void help(void);
 static account_t *choose_account(const char *opt_a, int opt_n, const account_t *cli);
 static void open_start_folder(void);
@@ -383,6 +385,40 @@ static void quit_now(void)
 }
 
 static void usage(void) { print_lines(stderr, HELP_USAGE); }
+
+/* mcm --programs: which viewers mcm would start here. */
+static void programs(void)
+{
+	int g = graphical();
+#ifdef _WIN32
+	const char *desk = "the program Windows uses";
+	printf("Environment: Windows\n");
+#else
+	const char *desk = "the desktop's program (xdg-open)";
+	const char *t = getenv("TERM");
+	printf("Environment: %s (TERM=%s)\n", g ? "graphical desktop (X or Wayland)" :
+	       "console, no X or Wayland", t && *t ? t : "unset");
+#endif
+	const char *ed = getenv("VISUAL");
+	if (!ed || !*ed) ed = getenv("EDITOR");
+#ifdef _WIN32
+	if (!ed || !*ed) ed = *cfg_editor ? cfg_editor : "Notepad";
+#else
+	if (!ed || !*ed) ed = *cfg_editor ? cfg_editor : "vi";
+#endif
+	printf("Editor:      %s\n", ed);
+	for (int k = 0; k < 2; k++) {
+		const char *v = viewer_for(k ? 'h' : 'p');
+		const char *key = k ? (g ? "html_viewer" : "html_viewer_console")
+		                    : (g ? "pdf_viewer" : "pdf_viewer_console");
+		const char *set = k ? (g ? cfg_html_viewer : cfg_html_viewer_console)
+		                    : (g ? cfg_pdf_viewer : cfg_pdf_viewer_console);
+		printf("%-12s %s (%s)\n", k ? "Web links:" : "PDF:",
+		       !v ? "none found" : *v ? v : desk,
+		       *set ? key : "default");
+		if (!v) printf("             set %s in mcm.conf\n", key);
+	}
+}
 static void help(void) { print_lines(stdout, HELP_CMDLINE); }
 
 /* Which account to use: -n, -a NAME, the server/user given on the command
@@ -532,8 +568,58 @@ int main(int argc, char **argv)
 	ac = &cli;
 	const char *opt_a = NULL;
 	int opt_n = 0;
+	/* --export DIR and --import PATH (or --export=DIR): taken out of argv
+	 * before getopt sees it */
+	const char *opt_export = NULL, *opt_import = NULL;
+	{
+		int k = 1, i = 1;
+		for (; i < argc && strcmp(argv[i], "--"); i++) {
+			const char **o = !strncmp(argv[i], "--export", 8) ? &opt_export
+			                 : !strncmp(argv[i], "--import", 8) ? &opt_import : NULL;
+			const char *rest = argv[i] + 8;
+			if (!o || (*rest && *rest != '=')) {
+				argv[k++] = argv[i];
+				continue;
+			}
+			if (*rest == '=') *o = rest + 1;
+			else if (i + 1 < argc) *o = argv[++i];
+			else *o = "";
+			if (!**o) {
+				fprintf(stderr, "mcm: %s needs a %s\n", o == &opt_export ? "--export" : "--import",
+				        o == &opt_export ? "directory" : "mailbox or directory");
+				return 2;
+			}
+		}
+		for (; i < argc; i++) argv[k++] = argv[i];
+		argv[k] = NULL;
+		argc = k;
+	}
+	if (opt_export && opt_import) {
+		fprintf(stderr, "mcm: --import and --export cannot be used at the same time\n");
+		return 2;
+	}
+	char xfer_path[1024] = "";
+	if (opt_export) {
+		char why[1200];
+		expand_home(xfer_path, sizeof xfer_path, opt_export);
+		const char *bad = xfer_export_check(xfer_path, why, sizeof why);
+		if (bad) {
+			fprintf(stderr, "mcm: --export %s: %s\n", opt_export, bad);
+			return 2;
+		}
+	}
+	if (opt_import) {
+		struct stat st;
+		expand_home(xfer_path, sizeof xfer_path, opt_import);
+		if (stat(xfer_path, &st) != 0) {
+			fprintf(stderr, "mcm: --import %s: %s\n", opt_import, strerror(errno));
+			return 2;
+		}
+	}
+
 	for (int i = 1; i < argc && strcmp(argv[i], "--"); i++) {
 		if (!strcmp(argv[i], "--help")) { help(); return 0; }
+		if (!strcmp(argv[i], "--programs")) { programs(); return 0; }
 		if (!strcmp(argv[i], "--version")) { puts("Mail Commander (mcm) " MCM_VERSION); return 0; }
 	}
 	int c;
@@ -580,6 +666,32 @@ int main(int argc, char **argv)
 	config_save();
 
 	att_cleanup();                  /* attachments opened last time */
+
+	/* --export / --import: do it after the login, then stop */
+	if (opt_export || opt_import) {
+		buf_t msg = {0};
+		int rc;
+		ui_progress("Reading folder list ...", login_bg);
+		if (folders_reload(NULL) != 0) {
+			rc = -1;
+			buf_printf(&msg, "%s", A.status);
+		} else if (opt_export) {
+			rc = xfer_export(xfer_path, -1, &msg);
+		} else {
+			struct local *src = xfer_import_open(xfer_path, &msg);
+			rc = src ? xfer_import(src, &msg) : -1;
+		}
+		ui_end();
+		fprintf(rc < 0 ? stderr : stdout, "%s%s\n", rc < 0 ? "mcm: " : "", buf_cstr(&msg));
+		buf_free(&msg);
+		store_logout(A.im);
+		store_free(A.im);
+		folders_free(A.folders, A.nfolders);
+		vault_free(master);
+		vault_free(A.smtp_pass);
+		return rc < 0 ? 1 : 0;
+	}
+
 	open_start_folder();
 	if (*theme_err && !*A.status) set_status("%s", theme_err);
 

@@ -522,9 +522,78 @@ static char *part_type(span_t s)
 
 static void render_part(buf_t *out, const char *p, size_t len, int depth);
 
+int mime_looks_like_html(const char *s, size_t n)
+{
+	size_t i = 0;
+	if (n >= 3 && !memcmp(s, "\xEF\xBB\xBF", 3)) i = 3;          /* byte order mark */
+	while (i < n && (s[i] == ' ' || s[i] == '\t' || s[i] == '\r' || s[i] == '\n')) i++;
+	return (n - i >= 14 && !strncasecmp(s + i, "<!DOCTYPE html", 14)) ||
+	       (n - i >= 5 && !strncasecmp(s + i, "<html", 5) &&
+	        (n - i == 5 || s[i + 5] == '>' || isspace((unsigned char)s[i + 5])));
+}
+
+/* A character that can end a CSS selector: body, .x, #id, a:hover, [attr], :root ... */
+static int sel_end(char c)
+{
+	return isalnum((unsigned char)c) || strchr("_-*.#:])", c);
+}
+
+/* CSS rules in s ("sel{prop:value;...}", also "sel { prop: value; }"):
+ * how many, up to max. */
+static int css_rules(const char *s, size_t n, int max)
+{
+	int found = 0;
+	for (size_t i = 1; i < n && found < max; i++) {
+		if (s[i] != '{') continue;
+		size_t k = i;
+		while (k > 0 && s[k - 1] == ' ') k--;     /* the selector before it */
+		if (k == 0 || !sel_end(s[k - 1])) continue;
+		size_t j = i + 1;
+		int colon = 0;
+		while (j < n && j - i < 400 && s[j] != '}' && s[j] != '{' && s[j] != '\n') {
+			if (s[j] == ':') colon = 1;
+			j++;
+		}
+		if (j < n && s[j] == '}' && colon) {
+			found++;
+			i = j;
+		}
+	}
+	return found;
+}
+
+int mime_plain_is_bad(const char *s, size_t n)
+{
+	return mime_looks_like_html(s, n) || css_rules(s, n, 3) >= 3;
+}
+
+/* The plain text of part p is an HTML page or full of CSS (decoded first). */
+static int plain_is_html(span_t p)
+{
+	const char *h, *b;
+	size_t hl, bl;
+	split_entity(p.p, p.len, &h, &hl, &b, &bl);
+	char *cte = hdr_get(h, hl, "Content-Transfer-Encoding");
+	buf_t dec = {0};
+	size_t n = bl < 65536 ? bl : 65536;          /* the start is enough */
+	if (cte && strcasestr(cte, "base64")) b64_decode(b, n, &dec);
+	else if (cte && strcasestr(cte, "quoted-printable")) qp_decode(b, n, &dec, 0);
+	else buf_add(&dec, b, n);
+	int r = mime_plain_is_bad(dec.d ? dec.d : "", dec.len);
+	buf_free(&dec);
+	free(cte);
+	return r;
+}
+
+/* T (mime_set_plain): the plain-text version as sent, not mcm's choice. */
+static int prefer_plain;
+
+void mime_set_plain(int on) { prefer_plain = on; }
+
 /* The part of a multipart/alternative that is shown: the plain text, unless
- * it is empty (only a line break or two, also in base64) and there is HTML;
- * else the HTML, else a nested multipart, else the first. */
+ * it is empty (only a line break or two, also in base64), an HTML page or
+ * full of CSS, and there is HTML; else the HTML, else a nested multipart,
+ * else the first. With prefer_plain: the plain text whenever there is one. */
 static int alt_pick(span_t *parts, int n)
 {
 	int pick = -1, html = -1, multi = -1;
@@ -535,13 +604,16 @@ static int alt_pick(span_t *parts, int n)
 		else if (!strncmp(t, "multipart/", 10) && multi < 0) multi = i;
 		free(t);
 	}
-	if (pick >= 0 && html >= 0) {
+	if (pick >= 0 && html >= 0 && !prefer_plain) {
 		const char *ph, *pb;
 		size_t phl, pbl, blank = 0;
 		split_entity(parts[pick].p, parts[pick].len, &ph, &phl, &pb, &pbl);
 		for (size_t k = 0; k < pbl; k++)
 			if (pb[k] == ' ' || pb[k] == '\t' || pb[k] == '\r' || pb[k] == '\n') blank++;
 		if (pbl - blank <= 8) pick = html;
+		/* a "plain text" that is an HTML page or full of CSS (a
+		 * newsletter's mistake): the real HTML version */
+		else if (plain_is_html(parts[pick])) pick = html;
 	}
 	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
 	return pick;
@@ -570,6 +642,33 @@ void mime_human_size(char *dst, size_t n, size_t bytes)
 	else if (bytes < 1024 * 1024) snprintf(dst, n, "%.1f KB", (double)bytes / 1024);
 	else snprintf(dst, n, "%.1f MB", (double)bytes / (1024 * 1024));
 }
+
+static int has_plain(const char *p, size_t len, int depth)
+{
+	const char *h, *b;
+	size_t hl, bl;
+	split_entity(p, len, &h, &hl, &b, &bl);
+	char *ct = hdr_get(h, hl, "Content-Type");
+	char *type = mime_type(ct);
+	char *disp = hdr_get(h, hl, "Content-Disposition");
+	int r = 0;
+	if (!strcmp(type, "text/plain")) {
+		r = !(disp && !strncasecmp(disp, "attachment", 10));
+	} else if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
+		char *boundary = param_get(ct, "boundary");
+		span_t *parts = NULL;
+		int n = boundary ? split_multipart(b, bl, boundary, &parts) : 0;
+		for (int i = 0; i < n && !r; i++) r = has_plain(parts[i].p, parts[i].len, depth + 1);
+		free(parts);
+		free(boundary);
+	}
+	free(ct);
+	free(type);
+	free(disp);
+	return r;
+}
+
+int mime_has_plain(const char *raw, size_t len) { return has_plain(raw, len, 0); }
 
 static void render_part(buf_t *out, const char *p, size_t len, int depth)
 {
@@ -618,17 +717,29 @@ static void render_part(buf_t *out, const char *p, size_t len, int depth)
 		size_t ul;
 		char *u = conv_to_utf8(cs, dec.d ? dec.d : "", dec.len, &ul);
 		char *fmt = param_get(ct, "format");
-		if (!strcmp(type, "text/html")) html_to_text(u, ul, out);
-		else if (mime_is_markdown(type)) md_to_text(u, ul, out);
+		buf_t t = {0};
+		int plain = 0;
+		if (!strcmp(type, "text/html")) html_to_text(u, ul, &t);
+		else if (mime_is_markdown(type)) md_to_text(u, ul, &t);
 		else if (fmt && !strcasecmp(fmt, "flowed")) {
 			char *ds = param_get(ct, "delsp");
 			size_t fl;
 			char *f = mime_unflow(u, ul, ds && !strcasecmp(ds, "yes"), &fl);
-			buf_add(out, f, fl);
+			buf_add(&t, f, fl);
 			free(f);
 			free(ds);
-		} else buf_add(out, u, ul);
+			plain = 1;
+		} else {
+			buf_add(&t, u, ul);
+			plain = 1;
+		}
 		free(fmt);
+		/* without the characters that show nothing (newsletters put rows
+		 * of them after the preview text); in plain text also written as
+		 * &#8204; and the like, copied there from the HTML */
+		if (plain && prefer_plain) buf_add(out, t.d ? t.d : "", t.len);   /* T: as sent */
+		else strip_invisible(t.d ? t.d : "", t.len, plain, out);
+		buf_free(&t);
 		if (out->len && out->d[out->len - 1] != '\n') buf_addc(out, '\n');
 		free(u);
 		free(cs);
@@ -843,16 +954,19 @@ char *mime_decode_text(const char *data, size_t len, int kind, const char *cte,
 	size_t ul;
 	char *u = conv_to_utf8(charset, dec.d ? dec.d : "", dec.len, &ul);
 	buf_free(&dec);
-	if (kind == MIME_PLAIN) {
+	if (kind == MIME_PLAIN) {               /* stripped after unflowing (msgview.c) */
 		if (outlen) *outlen = ul;
 		return u;
 	}
-	buf_t out = {0};
-	if (kind == MIME_HTML) html_to_text(u, ul, &out);
-	else md_to_text(u, ul, &out);
+	buf_t t = {0}, out = {0};
+	if (kind == MIME_HTML) html_to_text(u, ul, &t);
+	else md_to_text(u, ul, &t);
 	free(u);
+	/* as render_part: without the characters that show nothing */
+	strip_invisible(t.d ? t.d : "", t.len, 0, &out);
+	buf_free(&t);
 	if (outlen) *outlen = out.len;
-	return buf_steal(&out);
+	return out.d ? buf_steal(&out) : xstrdup("");
 }
 
 /* ------------------------------------------------------------------ */
