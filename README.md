@@ -41,6 +41,19 @@ where all known accounts are listed.
  test@localhost  (Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit
 ```
 
+## Screenshots
+
+All messages in these screenshots are made-up examples.
+
+| | |
+|:---:|:---:|
+| [![Message list and message](screenshots/message-tall.png)](screenshots/message-tall.png)<br>Message list and message, with links and attachments (default theme) | [![Links and attachments](screenshots/links-attachments.png)](screenshots/links-attachments.png)<br>All links and attachments of a message (T) |
+| [![The F1 menu](screenshots/menu.png)](screenshots/menu.png)<br>The F1 menu | [![Writing a reply](screenshots/editor-reply.png)](screenshots/editor-reply.png)<br>Writing a reply in the built-in editor |
+| [![Filter](screenshots/filter-amber.png)](screenshots/filter-amber.png)<br>Filtering the list (L), amber theme | [![Config](screenshots/config-dark.png)](screenshots/config-dark.png)<br>The Config menu, dark theme |
+
+[![Three windows on a wide terminal](screenshots/wide-three-windows.png)](screenshots/wide-three-windows.png)<br>
+On a wide terminal mcm shows folders, messages and the message side by side.
+
 ## Getting the source
 
 The source is on GitHub: <https://github.com/Luke1970/mcm>. With git:
