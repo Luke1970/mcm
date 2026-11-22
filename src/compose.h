@@ -33,7 +33,20 @@ typedef struct {
 	int smtputf8;             /* UTF-8 addresses/headers may be used (RFC 6531/6532) */
 	int eightbit;             /* body may be 8bit (8BITMIME) */
 	int draft;                /* for Drafts: recipients optional, bad addresses kept as text */
+	/* PGP: line (sign, encrypt): allowed for this account; pgp, when set,
+	 * turns the body entity (CRLF) into a multipart/signed or
+	 * multipart/encrypted one (out); NULL: only checked. rcpt: To and Cc,
+	 * hidden: Bcc. 0 = done, else err says why. */
+	int pgp_ok;
+	int (*pgp)(void *ctx, int how, const buf_t *entity, const char *const *rcpt, int nrcpt,
+	           const char *const *hidden, int nhidden, buf_t *out, char *err, size_t errlen);
+	void *pgp_ctx;
 } compose_opts;
+
+enum { COMPOSE_SIGN = 1, COMPOSE_ENCRYPT = 2 };
+/* A PGP: value ("sign", "encrypt", "sign encrypt", empty) as COMPOSE_*
+ * bits; -1 when it has another word. */
+int compose_pgp_parse(const char *v, int *how);
 
 typedef struct {
 	buf_t  msg;               /* message to transmit (without Bcc:), CRLF line ends */
@@ -47,6 +60,8 @@ typedef struct {
 	char  *subject;           /* decoded subject, for messages to the user */
 	int    nattach;           /* files attached (Attach: lines) */
 	size_t attach_bytes;      /* their size together */
+	int    pgp;               /* the PGP: line asks for COMPOSE_SIGN / COMPOSE_ENCRYPT */
+	int    pgp_done;          /* and the message was signed / encrypted */
 	int    err_line;          /* 0-based line of the error in the text, or -1 */
 	char   err[512];
 } compose_out;
@@ -62,6 +77,9 @@ const char *compose_date(time_t t);
  * the mailboxes in editor form "Name <addr>, addr2", or NULL if empty/bad.
  * `skip` (may be NULL) is an address to leave out (case-insensitive). */
 char *compose_addrs(const char *raw, const char *skip);
+/* The same, leaving out every address of skip_list (raw header text, may be
+ * NULL) and addresses that appear twice. */
+char *compose_addrs_skip(const char *raw, const char *skip_list);
 
 /* Just the addr-spec of the first mailbox in raw, or NULL. */
 char *compose_first_addr(const char *raw);

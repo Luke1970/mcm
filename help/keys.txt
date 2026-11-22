@@ -117,7 +117,11 @@ Selections available for list with emails:
                         first; shown on the border while possible)
 
 M R F (T)               Mail / Reply / Forward (opens the editor;
-                     T there attaches a file)
+                     T there attaches a file). Reply goes to all:
+                     the other recipients in Cc; [X] before Cc (or
+                     Ctrl-X on that line) empties it
+E                    in the Drafts folder: open the draft in the
+                     editor again (the old draft stays)
 
 A  Account           switch account, name, full name, password
 C  Config            SMTP, account, wrap width, theme, passwords

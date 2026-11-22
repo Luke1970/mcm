@@ -186,6 +186,7 @@ void load_selected(void)
 	A.pending_load = 1;
 	now_status("Loading message...");
 	A.pending_load = 0;
+	mv_pgp = pgp_on(ac) ? &pgp_hooks : NULL;
 	if (mv_open(&A.mv, A.im, m->uid, m->size) != 0) {
 		set_status("Error: %s", store_error(A.im));
 		return;
@@ -195,7 +196,9 @@ void load_selected(void)
 		m->seen = 1;
 		if (A.unseen > 0) A.unseen--;
 	}
+	int nm = A.newmail;
 	set_status("%s", before);   /* keep a message that was showing */
+	A.newmail = nm;
 }
 
 void select_msg(int i)
@@ -256,7 +259,17 @@ void sync_changes(void)
 
 	cache_clear();          /* sequence numbers moved: reload what is visible */
 	update_unseen();
-	if (added > 0) set_status("%d new message(s)", added);
+	if (added > 0) {
+		/* the new-mail notice, highlighted until a key is pressed; more
+		 * mail before that adds up */
+		int n = A.newmail + added;
+		time_t now = time(NULL);
+		struct tm tm;
+		localtime_r(&now, &tm);
+		set_status("%02d:%02d  New mail: %d new message%s in %s", tm.tm_hour, tm.tm_min, n,
+		           n == 1 ? "" : "s", A.folders[A.cur_folder].display);
+		A.newmail = n;
+	}
 	A.pending_load = 1;     /* reloads only if the selected message changed */
 }
 

@@ -305,6 +305,13 @@ static int open_has_att(void)
 	mpart_t **v;
 	has = mv_attachments(&A.mv, &v) > 0;
 	free(v);
+	if (A.mv.pgp_decrypted) {                     /* the decrypted message: no list mark for it */
+		buf_t raw = {0};
+		mv_raw(&A.mv, A.im, &raw);
+		has = mime_has_attachment(raw.d ? raw.d : "", raw.len);
+		buf_free(&raw);
+		return has;
+	}
 	if (!has && !A.mv.root)
 		for (int i = 0; i < nrows(); i++) {
 			const msg_t *m = msg_at(i);

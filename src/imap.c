@@ -761,11 +761,15 @@ static void bs_parse(const node_t *list, const char *sec, mpart_t *p, int depth)
 static int part_has_att(const mpart_t *p, int related)
 {
 	if (!strcmp(p->type, "multipart")) {
+		if (!strcmp(p->subtype, "encrypted")) return 0;      /* what is inside is not known */
 		int rel = related || !strcmp(p->subtype, "related");
 		for (int i = 0; i < p->nkids; i++)
 			if (part_has_att(&p->kids[i], rel)) return 1;
 		return 0;
 	}
+	if (!strcmp(p->type, "application") && !strncmp(p->subtype, "pgp-", 4) &&
+	    (!strcmp(p->subtype + 4, "signature") || !strcmp(p->subtype + 4, "encrypted")))
+		return 0;                                     /* PGP/MIME's own parts */
 	if (p->attachment) return 1;
 	if (related) return 0;
 	if (!strcmp(p->type, "text") && (!strcmp(p->subtype, "plain") || !strcmp(p->subtype, "html") ||

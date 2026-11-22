@@ -366,6 +366,7 @@ smtp_user = joerg
 smtp_login = joerg@imap.example.org
 store_password = yes
 password = enc1$16$8$1$7tWK5raqq4hb0Rj84KmwWQ==$FFn/udLX4L5p4vH9$2HsX...
+pgp = sign
 
 [account Home]
 type = pop3
@@ -384,7 +385,7 @@ path = ~/Mail
 
 The full name goes into From: as `Jörg Tester <joerg@example.org>`; it is quoted
 or RFC 2047 encoded when needed. **A** (Account) lists the accounts: Enter on the
-current one (marked `*`) changes its name, full name and stored password; Enter
+current one (marked `*`) changes its name, full name, PGP settings and stored password; Enter
 on another one, or on *New account*, switches to that account. A config
 file from emsg 0.3 (the old name, without sections) is read as one account.
 
@@ -562,12 +563,13 @@ columns; 15 from an older mcm counts as 0).
 | ↑ / ↓ | in the message window: to the previous / next link or attachment on the screen (underlined; the chosen one between `>` and `<`), else scroll a line; Enter opens the link or asks Open / Save for the attachment, Esc leaves it; a mouse click on one does the same |
 | L | filter the email list (see *Filter*) |
 | → | from the email list: to the message window |
-| F5 | refresh folder (also polled every 60 s) |
+| F5 | refresh folder (also polled every 60 s); new mail shows `18:35  New mail: 3 new messages in INBOX` highlighted in the status line until you press a key |
 | F1, F10 | the menu: every command in one window (see *Menu* below) |
 | ? | the key list (help) |
 | Q | quit |
 | Ctrl-Q, Ctrl-C | quit at once, from anywhere: the main screen, any dialog or the editor (see below) |
-| M R F | Mail / Reply / Forward: opens the editor |
+| M R F | Mail / Reply / Forward: opens the editor; Reply goes to all (see *Writing mail*) |
+| E | in the Drafts folder: open the draft in the editor again (see *Writing mail*) |
 | C | Config: SMTP settings, account settings, switch account, wrap width, theme, delete all stored passwords |
 | Ctrl-← / Ctrl-→ | narrower / wider left column |
 | A | accounts: switch, add, name, full name, stored password |
@@ -758,8 +760,8 @@ code, so mcm cannot tell them apart.
 - **Emaillist**: fiLter (L), Other: the selected messages (O).
 - **Email**:
   - / find: the `:/` search of the message window.
-  - Fwd (F), Header (H), heX (X), Mail (M), Print (P), Reply (R), Save (S),
-    Wrap (W).
+  - edit draft (E, in the Drafts folder), Fwd (F), Header (H), heX (X),
+    Mail (M), Print (P), Reply (R), Save (S), Wrap (W).
 - **Help**: about; command line (the text of `mcm --help`); key list (also ? on the main screen).
 
 ### Export and import
@@ -859,8 +861,21 @@ another folder ends it too.
 
 ## Writing mail
 
-**M** (new), **R** (reply to the sender, or Reply-To) and **F** (forward) open the
-editor. The text is the header block, an empty line and the message:
+**M** (new), **R** (reply) and **F** (forward) open the editor.
+
+**R replies to all:** To is the sender (or Reply-To), Cc the other people
+the message went to (its To and Cc), without you, without the sender again
+and without addresses twice. To answer only the sender, click the **[X]**
+before `Cc:` in the header window, or press **Ctrl-X** on the Cc line: Cc is
+emptied (**u** in command mode brings it back).
+
+**E** in the Drafts folder opens the chosen draft in the editor again: To,
+Cc, Bcc, Subject, the text and the attachments (written to the private
+attachment folder and named in `Attach:` lines), and In-Reply-To /
+References of a reply. **K** keeps it as a new draft, **S** sends it; the old
+draft stays in Drafts until you delete it.
+
+The text is the header block, an empty line and the message:
 
 ```
 To: Bob <bob@example.com>, Jürgen Müller <jm@example.org>
@@ -1017,7 +1032,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.994 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.995 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -1059,6 +1074,88 @@ password. The client follows RFC 5321bis: EHLO
 ends, and its timeouts. If the server refuses one recipient, nothing is sent and
 the refused address is shown. Server certificates are checked the same way as for
 IMAP.
+
+## PGP
+
+mcm signs, encrypts, checks and decrypts mail with OpenPGP (RFC 4880) through
+the `gpg` program of GnuPG; on Windows install [Gpg4win](https://gpg4win.org).
+Your keys stay in GnuPG's own key ring (`~/.gnupg`), mcm never sees them. PGP
+is turned on per account, with **A** (Account) → Enter on the current
+account, or in `mcm.conf`:
+
+```
+[account Work]
+pgp = sign
+pgp_key = joerg@example.org
+```
+
+| `pgp =` | |
+|---|---|
+| `no` (or not there) | off: messages are shown as they are, the editor has no PGP: line |
+| `yes` | on; new mail has an empty `PGP:` line |
+| `sign`, `encrypt`, `sign encrypt` | on; the `PGP:` line of new mail says this already |
+
+`pgp_key` is the key you sign with (a user ID, address or fingerprint);
+without it the account's address is used.
+
+**Reading.** A signed message (PGP/MIME, `multipart/signed`) gets a line under
+the header such as
+
+```
+[PGP: Good signature from Bob <bob@example.org>, key 4FC787D0EF0E4A13]
+```
+
+or `BAD SIGNATURE ... the message was changed after it was signed`, an expired
+or revoked key, or `signed with key ..., which is not in your key ring`
+(with the command that fetches it, `gpg --locate-keys ADDRESS`). A key that you
+have not certified is shown as `(key not certified)`, and a key whose user ID
+is not the sender's address says so. An encrypted message (`multipart/encrypted`)
+is decrypted and shown as any other message, with its attachments in **K**;
+the line says `Decrypted` and, when it was signed as well, whose signature it
+has. Text with an inline `-----BEGIN PGP MESSAGE-----` or `-----BEGIN PGP
+SIGNED MESSAGE-----` block is handled the same way, the block replaced by its
+text. The signature part itself (`signature.asc`) is not listed as an
+attachment. To check a signed message, mcm loads it whole once (up to 64 MB).
+
+**Passphrase.** When gpg needs the passphrase of your secret key and
+gpg-agent does not have it yet, mcm asks for it in a dialog and hands it to
+gpg (`--pinentry-mode loopback`); gpg-agent then keeps it for a while as
+usual. A wrong passphrase is asked again; Esc leaves the message undecrypted.
+
+**Writing.** The header of a new message has a **PGP:** line:
+
+```
+PGP:     sign encrypt
+```
+
+- `sign`: the message becomes `multipart/signed` with a detached signature
+  (RFC 3156). The text then goes out quoted-printable, so that no server can
+  change what was signed.
+- `encrypt`: the message is encrypted for every address in To, Cc and Bcc,
+  and for yourself (so that the copy in Sent can be read). Bcc addresses are
+  hidden recipients (`--hidden-recipient`): the others cannot see them in the
+  encrypted message either. The **subject and other headers are not
+  encrypted**.
+- `sign encrypt`: both, in one OpenPGP message (RFC 3156 6.2).
+- empty: neither.
+
+A reply to an encrypted message gets `encrypt` in its PGP: line. Before
+connecting to the SMTP server mcm runs gpg, so a missing key gives an error at
+once, for example `PGP: no usable key for carol@example.org (gpg --locate-keys
+ADDRESS imports one)`; the message is not sent. Recipients' keys do not
+have to be certified (`--trust-model always`, as most mail programs do):
+make sure they are the right ones. Drafts are saved **unencrypted**, with an
+`X-Mcm-PGP:` header that brings the PGP: line back when you open the draft
+again with **E**.
+
+**Your own key for other people.** Others can find your public key
+automatically when your mail domain publishes it in a Web Key Directory
+(WKD, `https://openpgpkey.DOMAIN/.well-known/openpgpkey/...` or
+`https://DOMAIN/.well-known/openpgpkey/...`); `gpg --locate-keys` uses it.
+Alternatively, send it as an attachment (`gpg --export --armor ADDRESS > key.asc`)
+or upload it to keys.openpgp.org.
+
+`mcm --programs` shows whether gpg is found and for which accounts PGP is on.
 
 ## HTML and Markdown messages
 
@@ -1448,6 +1545,7 @@ How it is done:
 | `src/certs.c` | untrusted certificates and the always-accepted ones |
 | `src/account.c` | accounts, stored passwords, the Config menu, SMTP settings |
 | `src/send.c` | writing mail (new, reply, forward), sending it or keeping it as a draft |
+| `src/pgp.c` | PGP through gpg: checking signatures, decrypting, signing and encrypting (PGP/MIME, inline) |
 | `src/store.c` | one interface for IMAP, POP3 and local folders; undo of the last copy or move |
 | `src/pop3.c` | POP3: TLS or required STLS, USER/PASS, LIST, UIDL, TOP, RETR, new sessions |
 | `src/local.c` | Maildir (Maildir++), mbox and MH folders, the POP3 inbox and its seen/answered state |
@@ -1480,7 +1578,10 @@ How it is done:
 7. ~~Accounts, full name, encrypted stored passwords~~
 8. ~~POP3 and local mailboxes (Maildir, mbox, MH)~~
 9. ~~Attachments when writing~~
-10. Next: open drafts again, save received attachments, reply-all
+10. ~~Open drafts again (E), save received attachments (K), reply-all (R)~~
+11. ~~PGP: signatures and encryption, per account~~
+12. Next: quick keys in the list (delete, unread, flag), sorting by name and
+    date, IDLE or a cache for slow connections
 
 ## License
 

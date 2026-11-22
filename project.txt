@@ -295,7 +295,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.994 Quit Mail Reply Forward Account Config F1=Menu  date time
+  mcm 0.995 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -339,6 +339,9 @@ Local (src/local.c):
   ui.c, also for ui_run_program). Without a desktop, xdg-open for other
   attachments runs in the terminal too (it was detached to /dev/null).
   mcm --programs prints the environment and the chosen programs.
+- New mail (0.995, sync_changes): "HH:MM  New mail: N new messages in
+  FOLDER", A.newmail = N (more mail adds up), drawn bold in
+  CP_HIGHLIGHT (only the text) until set_status (any key) clears it.
 - Status line: "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
   with the focus on the email list, "Enter Open  F5 Refresh  Q/^Q Quit" on
   the folders and accounts (no F1, Tab, column or L/O hint: F1=Menu is in
@@ -883,6 +886,18 @@ it (tested with a folder of 250,000 messages):
 Editor (vim-like):
 - M new, R reply (to Reply-To or the sender; In-Reply-To and References
   set; text quoted with "> "), F forward (original headers and text).
+  R is reply-all (0.995): Cc = the original To + Cc without the To just
+  made, the account's own address (login_address, an @ user) and
+  doubles (compose_addrs_skip). Header window: "[X] " before Cc (XGUT
+  columns in front of every name); a click on it or Ctrl-X on the Cc line
+  (cc_clear, undoable) empties Cc and its continuation lines.
+- E in the Drafts folder (0.995, send.c compose_draft): the draft fetched
+  whole; To/Cc/Bcc (compose_addrs, else as written), Subject,
+  In-Reply-To, References, the text (mime_render_body without its
+  [Attachment: ...] lines), each attachment written with att_temp_file
+  (the private attachment folder) and named in an Attach: line; From:
+  this account's, else the draft's. Keep/Send as usual; the old draft is
+  not removed.
   The text taken from the original is made valid UTF-8 first (utf8_clean):
   bytes that are not UTF-8 and C1 controls are read as Windows-1252, other
   control characters (CR, VT, ...) except tab are left out; otherwise the
@@ -1015,6 +1030,40 @@ The message that goes out:
 - Local accounts send with their SMTP settings; without a stored password
   mcm asks for one.
 
+PGP (src/pgp.c, 0.995): through the gpg program (GnuPG, Gpg4win), per
+account: pgp = no / yes / sign / encrypt / sign encrypt (what the PGP:
+line of new mail says), pgp_key = the signing key (default the address);
+A -> Enter on the current account changes both.
+- gpg runs with --batch --pinentry-mode loopback --status-file; data in
+  files in the private attachment folder (removed right away), the
+  passphrase only on gpg's stdin (fork/exec, on Windows CreateProcess with
+  a pipe; no shell). NEED_PASSPHRASE: mcm's dialog, then again with
+  --passphrase-fd 0; a wrong one (BAD_PASSPHRASE, or ERROR/FAILURE with
+  error code 11 in gpg 2.4) is asked again, Esc gives up.
+- Reading (msgview.c, hooks mv_pgp set in load_selected): a top-level
+  multipart/signed is loaded whole (mv_raw, up to 64 MB), part 1 with CRLF
+  line ends and the signature go to gpg --verify; multipart/encrypted:
+  part 2 to gpg --decrypt, and the result replaces the message: hdr = its
+  header without Content-* + the decrypted entity's header, the fallback
+  leaf its body (root NULL), so rendering, T, K (mv_raw) work on it;
+  signed inside (RFC 3156 6.1) is checked too. The note goes under the
+  header summary: "[PGP: ...]". Inline BEGIN PGP MESSAGE / SIGNED MESSAGE
+  blocks in a completely loaded text part: gpg --decrypt once per block
+  (mv->pgp_blk), the block replaced by "[PGP: note]" and its text when
+  rendering. application/pgp-signature and pgp-encrypted parts are
+  neither shown nor listed (nor @ in the list).
+- Writing: PGP: line in the header (shown in the header window; parsed by
+  compose_pgp_parse). compose_build makes the body entity once, then
+  o->pgp (send.c pgp_cb -> pgp_wrap) turns it into multipart/signed
+  (detached signature, micalg from SIG_CREATED; text forced to
+  quoted-printable when it is not plain 7bit without trailing spaces) or
+  multipart/encrypted (--armor --encrypt --trust-model always, yourself +
+  To + Cc as --recipient, Bcc as --hidden-recipient; with sign: one
+  OpenPGP message). Done before connecting to SMTP (errors at once:
+  INV_RECP -> "no usable key for ..."). Drafts are not encrypted; they
+  keep the line as X-Mcm-PGP, which E turns back into PGP:. A reply to an
+  encrypted message gets encrypt in its PGP: line.
+
 
 18. MS-DOS (planned) and the benchmark
 --------------------------------------
@@ -1061,6 +1110,7 @@ the login times calculated from them.
   src/certs.c     untrusted certificates, ~/.config/mcm/certs
   src/account.c   accounts, stored passwords, Config menu, SMTP settings
   src/send.c      new mail, reply, forward: send or keep as draft
+  src/pgp.c       PGP through gpg: verify, decrypt, sign, encrypt
   src/store.c     one interface for IMAP, POP3 and local folders
   src/imap.c      IMAP client
   src/pop3.c      POP3 client
@@ -1100,4 +1150,7 @@ the login times calculated from them.
 10. HTML and Markdown as text, mouse selection and wheel, portability to
     the BSDs, MS-DOS study
 
-Next: open drafts again, save received attachments, reply-all.
+11. Open drafts again, save received attachments, reply-all, new-mail
+    notice; PGP (0.995)
+
+Next: quick keys in the list, sorting by name and date.

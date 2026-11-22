@@ -48,6 +48,7 @@ static void leave_account(void);
 
 void set_status(const char *fmt, ...)
 {
+	A.newmail = 0;
 	va_list ap;
 	va_start(ap, fmt);
 	vsnprintf(A.status, sizeof A.status, fmt, ap);
@@ -418,6 +419,12 @@ static void programs(void)
 		       *set ? key : "default");
 		if (!v) printf("             set %s in mcm.conf\n", key);
 	}
+	buf_t on = {0};
+	for (int i = 0; i < naccts; i++)
+		if (pgp_on(&accts[i])) buf_printf(&on, "%s%s", on.len ? ", " : "", accts[i].name);
+	printf("PGP:         %s (%s)\n", pgp_found() ? pgp_program() : "gpg not found: install GnuPG",
+	       on.len ? on.d : "on for no account: pgp = yes in mcm.conf");
+	buf_free(&on);
 }
 static void help(void) { print_lines(stdout, HELP_CMDLINE); }
 

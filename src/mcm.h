@@ -12,6 +12,7 @@
  *   certs.c    untrusted certificates
  *   account.c  accounts, stored passwords, Config menu, SMTP settings
  *   send.c     writing, sending and keeping mail
+ *   pgp.c      OpenPGP through gpg: signatures, encryption
  */
 #ifndef MCM_H
 #define MCM_H
@@ -51,7 +52,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.994"
+#define MCM_VERSION   "0.995"
 #define POLL_SECONDS   60       /* check for new mail when idle */
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
@@ -91,6 +92,9 @@ typedef struct {
 	int   store;               /* STORE_ASK / STORE_YES / STORE_NO: keep the password on disk */
 	char *pass_enc;            /* encrypted IMAP password (vault.h), or NULL */
 	char *smtp_pass_enc;       /* encrypted SMTP password, or NULL = use the IMAP one */
+	char  pgp[24];             /* PGP (pgp.c): "" / "no" off, "yes" on, or what new mail gets:
+	                            * "sign", "encrypt", "sign encrypt" */
+	char  pgp_key[256];        /* key to sign with (and encrypt to yourself); "": the address */
 } account_t;
 
 enum { STORE_ASK, STORE_YES, STORE_NO };
@@ -196,6 +200,7 @@ typedef struct {
 	size_t    need_hex_off, need_hex_len;
 
 	char      status[256];
+	int       newmail;           /* status is the new-mail notice: its count (highlighted) */
 	time_t    last_poll;
 } app_t;
 extern app_t A;
@@ -260,6 +265,8 @@ int msg_colon(void);
 int msg_colon_with(const char *init);
 void links_window(int key);
 void msg_toggle_plain(void);   /* T */
+int  att_temp_file(const char *name, const char *data, size_t len, char *out, size_t n);
+void compose_draft(void);     /* E in the Drafts folder */
 void link_step(int dir);
 int link_active_visible(void);
 int link_open_active(void);
@@ -285,6 +292,8 @@ void login_bg(void);
 
 /* attach.c */
 void att_cleanup(void);
+/* The private folder for opened attachments (and pgp.c's temporary files). */
+int att_private_dir(char *dir, size_t n);
 int open_with_viewer(const char *path);
 int open_url(const char *url);
 int graphical(void);
@@ -357,5 +366,22 @@ void compose_start(int kind);
 void set_status(const char *fmt, ...) __attribute__((format(MCM_PRINTF, 1, 2)));
 void expand_home(char *out, size_t n, const char *in);
 void switch_account(const char *name);
+
+/* pgp.c */
+enum { PGP_SIGN = COMPOSE_SIGN, PGP_ENCRYPT = COMPOSE_ENCRYPT };
+int  pgp_on(const account_t *a);
+/* The key of account a: pgp_key, else its address. */
+void pgp_key(const account_t *a, char *out, size_t n);
+const char *pgp_program(void);
+int  pgp_found(void);          /* gpg can be run */
+/* Check a detached signature / decrypt (or check clearsigned text): a note
+ * for the reader, malloc'd. */
+char *pgp_verify(const char *data, size_t n, const char *sig, size_t sn, const char *from);
+char *pgp_decrypt(const char *in, size_t n, buf_t *out, int *encrypted, const char *from);
+/* Sign and/or encrypt a MIME entity (header lines, blank line, body;
+ * CRLF) into out: a multipart/signed or multipart/encrypted entity. */
+int  pgp_wrap(int how, const char *key, const buf_t *entity, const char *const *rcpt, int nrcpt,
+              const char *const *hidden, int nhidden, buf_t *out, char *err, size_t errlen);
+extern const mv_pgp_t pgp_hooks;
 
 #endif

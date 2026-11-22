@@ -433,6 +433,16 @@ static void draw_statusbar(void)
 	                  : A.focus == COL_LIST ? "(Shift)Enter=Select message(s)  F5 Refresh  Q/^Q Quit"
 	                  : "Enter Open  F5 Refresh  Q/^Q Quit";
 	ui_puts(y, lw + 1, msg, COLS - lw - 1, 0, CP_MENU);
+	if (A.newmail && msg == A.status) {          /* the new-mail notice: highlighted */
+		int tw = 0;
+		for (size_t i = 0, n = strlen(msg); i < n;) {
+			size_t cl;
+			int w = ui_wcwidth(utf8_next(msg + i, n - i, &cl));
+			tw += w > 0 ? w : 0;
+			i += cl;
+		}
+		ui_puts(y, lw + 1, msg, tw + 1 < COLS - lw - 1 ? tw + 1 : COLS - lw - 1, A_BOLD, CP_HIGHLIGHT);
+	}
 }
 
 /* More columns than this: Folders | List | Message side by side (no Tab). */

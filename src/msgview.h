@@ -23,6 +23,23 @@ typedef struct {
 	int      done;     /* everything fetched */
 } mv_leaf;
 
+/* PGP (set by the program while the account has it on; NULL: off).
+ * from: the sender's address. Both return a note for the reader. */
+typedef struct {
+	/* a detached signature sig over data */
+	char *(*verify)(const char *data, size_t n, const char *sig, size_t sn, const char *from);
+	/* an OpenPGP message or clearsigned text: *out its content (empty
+	 * when it could not be had); *encrypted: it was encrypted */
+	char *(*decrypt)(const char *in, size_t n, buf_t *out, int *encrypted, const char *from);
+} mv_pgp_t;
+extern const mv_pgp_t *mv_pgp;
+
+/* An inline PGP block in the text and what it became. */
+typedef struct {
+	char  *armor;        /* the block as it appears in the decoded text (no CR) */
+	char  *result;       /* "[PGP: note]\n" and its content */
+} mv_pgpblk;
+
 typedef struct {
 	int       open;
 	uint32_t  uid, size;     /* size = RFC822.SIZE of the whole message */
@@ -41,6 +58,13 @@ typedef struct {
 	size_t    hdr_end;       /* text before this offset is the header section */
 	int       plain;         /* T: the plain-text version as sent, not mcm's choice */
 	int       plain_changed;
+
+	/* PGP */
+	char     *pgp_note;      /* PGP/MIME: what the signature check or decryption said */
+	int       pgp_enc;       /* something in it was encrypted (a reply should be too) */
+	int       pgp_decrypted; /* hdr + the fallback leaf are the decrypted message */
+	mv_pgpblk *pgp_blk;      /* inline blocks done */
+	int       npgp_blk;
 
 	/* hex window */
 	size_t    hex_off;
@@ -69,6 +93,8 @@ int  mv_more(msgview_t *mv, store_t *im);
  * the structure), 0 without a structure (then the raw message is parsed,
  * mime_attachments). */
 int  mv_attachments(msgview_t *mv, mpart_t ***out);
+/* The whole raw message (the decrypted one, if it was encrypted). */
+int  mv_raw(msgview_t *mv, store_t *im, buf_t *out);
 /* Fetch the whole (still encoded) content of part p into out. */
 int  mv_fetch_part(msgview_t *mv, store_t *im, const mpart_t *p, buf_t *out);
 

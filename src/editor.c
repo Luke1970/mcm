@@ -147,13 +147,14 @@ static void hdr_space(line_t *l)
 }
 
 /* The header window shows only the headers the writer fills in: To, Cc,
- * Bcc and Subject, and the Attach: lines of attached files. The others
+ * Bcc, PGP (an account with PGP on) and Subject, and the Attach: lines of
+ * attached files. The others
  * (From, Date, In-Reply-To, References, ...) are kept as they are and sent
  * along; :e shows them in the external editor. An empty From: is shown
  * as well, to be filled in (an account without an address). */
 static int shown_header(const char *s, size_t n, int prev_shown)
 {
-	static const char *const show[] = {"To", "Cc", "Bcc", "Subject", "Attach", NULL};
+	static const char *const show[] = {"To", "Cc", "Bcc", "PGP", "Subject", "Attach", NULL};
 	if (n && (s[0] == ' ' || s[0] == '\t')) return prev_shown;   /* continuation line */
 	const char *c = memchr(s, ':', n);
 	if (!c) return 1;                                             /* not a header (yet) */
@@ -549,7 +550,9 @@ static int line_rows(const pane_t *pn, const line_t *l)
 /* ------------------------------------------------------------------ */
 /* Drawing                                                             */
 
-/* Header window: width of the name column ("Subject: "), at most half. */
+/* Header window: width of the name column ("Subject: ", after the "[X] "
+ * of Cc), at most half. */
+#define XGUT 4
 static int name_w(const pane_t *pn)
 {
 	int w = 0;
@@ -558,7 +561,25 @@ static int name_w(const pane_t *pn)
 		int cw = n ? col_of(&pn->l[i], n) + 1 : 0;
 		if (cw > w) w = cw;
 	}
+	w += XGUT;                               /* "[X] " before Cc */
 	return w > pn->cols / 2 ? pn->cols / 2 : w;
+}
+
+/* The header window's "Cc:" line, or -1. */
+static int cc_line(const pane_t *pn)
+{
+	for (int i = 0; i < pn->n; i++)
+		if (hdr_name_len(&pn->l[i]) == 3 && !strncasecmp(pn->l[i].s, "Cc:", 3)) return i;
+	return -1;
+}
+
+/* Does the Cc line (or a continuation of it) hold addresses? */
+static int cc_filled(const pane_t *pn, int i)
+{
+	for (int k = i; k < pn->n && (k == i || (pn->l[k].len && is_blank(pn->l[k].s[0]))); k++)
+		for (size_t j = k == i ? 3 : 0; j < pn->l[k].len; j++)
+			if (!is_blank(pn->l[k].s[j])) return 1;
+	return 0;
 }
 
 /* Header line i: the column its field starts at (a line whose name is
@@ -595,8 +616,10 @@ static void draw_field(const pane_t *pn, int y, int i, int nw, int *cur_y, int *
 	size_t nl = hdr_name_len(l);
 	if (nl) {
 		char *name = xstrndup(l->s, nl);
-		ui_puts(y, pn->x0, name, nw > 1 ? nw - 1 : 1, A_BOLD, CP_NORMAL);
+		ui_puts(y, pn->x0 + XGUT, name, nw > XGUT + 1 ? nw - XGUT - 1 : 1, A_BOLD, CP_NORMAL);
 		free(name);
+		/* [X] empties Cc (a click, or Ctrl-X on the line) */
+		if (i == cc_line(pn) && cc_filled(pn, i)) ui_puts(y, pn->x0, "[X]", 3, A_BOLD, CP_NORMAL);
 	}
 	line_t v;
 	int vx = field_of(pn, i, nw, &v);
@@ -889,7 +912,7 @@ static void draw(void)
 		ui_puts(LINES - 1, 1, HELP_EDITOR[0] ? HELP_EDITOR[0] : "", COLS - 2, 0, CP_MENU);
 	} else {
 		const char *help = e->mode == M_HDR
-			? "-- HEADER --   Esc command mode   Tab or Enter on Subject: write the message   arrows move   Enter new header line"
+			? "-- HEADER --   Esc command mode   Tab or Enter on Subject: write the message   ^X on Cc: empty it   Enter new header line"
 			: "-- EDIT --   Esc command mode   arrows move (↑ at the top: header)   Enter new line";
 		char pos[64];
 		snprintf(pos, sizeof pos, "Ln %d/%d  Col %d", e->p->cy + 1, e->p->n,
@@ -1210,6 +1233,8 @@ static int movement(ed_t *e, int ch)
 	return 1;
 }
 
+static void cc_clear(ed_t *e);
+
 /* Click on the menu (command mode, or editing the message) gives its key in
  * *ch. A click in a window (its text, empty part or frame) makes it the
  * window being edited, with the cursor on the clicked line (below the text:
@@ -1264,6 +1289,11 @@ static void mouse(ed_t *e, int *ch)
 		if (pn->field) {                   /* header: row = line, the field from its column */
 			int i = pn->top + ev.y - pn->y0;
 			if (ev.y < pn->y0 || i >= pn->n) i = pn->n - 1;
+			if (ev.y >= pn->y0 && i == cc_line(pn) && ev.x >= pn->x0 && ev.x < pn->x0 + 3 &&
+			    cc_filled(pn, i)) {
+				cc_clear(e);                   /* [X] */
+				return;
+			}
 			line_t v;
 			int vx = field_of(pn, i, name_w(pn), &v), col = ev.x - pn->x0 - vx;
 			int hoff = i == pn->cy ? pn->hoff : 0;
@@ -1323,8 +1353,40 @@ static void hdr_enter(ed_t *e)
 	e->modified = 1;
 }
 
+/* [X] / Ctrl-X: empty the Cc line (and its continuation lines). */
+static void cc_clear(ed_t *e)
+{
+	pane_t *pn = &e->hp;
+	int i = cc_line(pn);
+	if (i < 0 || !cc_filled(pn, i)) return;
+	snapshot(e);
+	pane_t *was = e->p;
+	e->p = pn;
+	while (i + 1 < pn->n && pn->l[i + 1].len && is_blank(pn->l[i + 1].s[0])) del_line(e, i + 1);
+	free(pn->l[i].s);
+	pn->l[i].s = xstrdup("Cc: ");
+	pn->l[i].len = 4;
+	e->p = was;
+	if (e->p == pn) {
+		pn->cy = i;
+		pn->cx = 4;
+		pn->want_col = col_of(&pn->l[i], pn->cx);
+	}
+	snprintf(e->msg, sizeof e->msg, "%s", "Cc emptied: the reply goes to the sender only (u undoes it)");
+	e->msg_err = 0;
+}
+
 static void insert_key(ed_t *e, wint_t wc, int is_key)
 {
+	if (!is_key && wc == 24 && e->p == &e->hp && e->p->cy >= cc_line(e->p) && cc_line(e->p) >= 0) {
+		/* Ctrl-X on the Cc line (or a continuation of it) */
+		int i = cc_line(e->p), k = e->p->cy;
+		while (k > i && e->p->l[k].len && is_blank(e->p->l[k].s[0])) k--;
+		if (k == i) {
+			cc_clear(e);
+			return;
+		}
+	}
 	if (is_key) {
 		switch (wc) {
 		case KEY_BACKSPACE:

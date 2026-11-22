@@ -246,23 +246,37 @@ static void account_settings(void)
 	snprintf(full, sizeof full, "%s", ac->fullname);
 	snprintf(addr, sizeof addr, "%s", ac->user);
 	int local = ac->type == STORE_LOCAL;
-	const char *err = local ? "Full name and address are used in From:"
-	                        : "Full name is shown in From: (may be empty)";
+	const char *err = local ? "Name and address go in From:; PGP: no/yes/sign/encrypt"
+	                        : "PGP: no, yes, sign, encrypt; PGP key empty: your address";
+	char pgp[24], pkey[256];
+	snprintf(pgp, sizeof pgp, "%s", pgp_on(ac) ? ac->pgp : "no");
+	snprintf(pkey, sizeof pkey, "%s", ac->pgp_key);
 	for (;;) {
 		ui_field f[] = {
 			{"Account", name, sizeof name, 0, 0},
 			{"Full name", full, sizeof full, 0, 1},
+			{"PGP", pgp, sizeof pgp, 0, 1},
+			{"PGP key", pkey, sizeof pkey, 0, 1},
 			{"E-mail address", addr, sizeof addr, 0, 1},
 		};
-		if (ui_input_dialog("Account settings", f, local ? 3 : 2, err, draw_bg) < 0) return;
+		if (ui_input_dialog("Account settings", f, local ? 5 : 4, err, draw_bg) < 0) return;
 		const account_t *o = account_find(name);
+		int how;
 		if (o && o != ac) { err = "Another account has that name"; continue; }
 		if (strchr(name, ']')) { err = "The name cannot contain ']'"; continue; }
+		if (compose_pgp_parse(pgp, &how) != 0) {
+			err = "PGP: write no, yes, sign, encrypt or sign encrypt";
+			continue;
+		}
 		break;
 	}
 	snprintf(ac->name, sizeof ac->name, "%s", str_trim(name));
 	snprintf(ac->fullname, sizeof ac->fullname, "%s", str_trim(full));
 	if (local) snprintf(ac->user, sizeof ac->user, "%s", str_trim(addr));
+	str_trim(pgp);
+	snprintf(ac->pgp, sizeof ac->pgp, "%s", !*pgp || !strcasecmp(pgp, "off") ? "no" : pgp);
+	if (!strcasecmp(ac->pgp, "no") && !*ac->pgp_key && !*str_trim(pkey)) ac->pgp[0] = '\0';
+	snprintf(ac->pgp_key, sizeof ac->pgp_key, "%s", str_trim(pkey));
 	config_save();
 	if (ac->type == STORE_LOCAL) {
 		set_status("Account %s saved", ac->name);

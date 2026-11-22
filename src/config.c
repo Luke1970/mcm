@@ -127,6 +127,8 @@ void config_load(void)
 			a->store = !strcasecmp(v, "yes") ? STORE_YES : !strcasecmp(v, "no") ? STORE_NO : STORE_ASK;
 		else if (!strcasecmp(k, "password")) set_secret(&a->pass_enc, *v ? xstrdup(v) : NULL);
 		else if (!strcasecmp(k, "smtp_password")) set_secret(&a->smtp_pass_enc, *v ? xstrdup(v) : NULL);
+		else if (!strcasecmp(k, "pgp")) snprintf(a->pgp, sizeof a->pgp, "%s", v);
+		else if (!strcasecmp(k, "pgp_key")) snprintf(a->pgp_key, sizeof a->pgp_key, "%s", v);
 	}
 	fclose(f);
 	for (int i = 0; i < naccts; i++) account_name(&accts[i]);
@@ -205,6 +207,9 @@ void config_save(void)
 		if (a->store != STORE_ASK) fprintf(f, "store_password = %s\n", a->store == STORE_YES ? "yes" : "no");
 		if (a->pass_enc) fprintf(f, "password = %s\n", a->pass_enc);
 		if (a->smtp_pass_enc) fprintf(f, "smtp_password = %s\n", a->smtp_pass_enc);
+		if (*a->pgp)
+			fprintf(f, "# PGP: no, yes, or what new mail gets: sign, encrypt, sign encrypt\npgp = %s\n", a->pgp);
+		if (*a->pgp_key) fprintf(f, "pgp_key = %s\n", a->pgp_key);
 	}
 	int bad = ferror(f);
 	if (fclose(f) != 0 || bad) { unlink(tmp); return; }

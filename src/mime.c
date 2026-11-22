@@ -509,6 +509,33 @@ static int split_multipart(const char *body, size_t blen, const char *boundary,
 	return n;
 }
 
+int mime_split(const char *raw, size_t len, mime_span **parts)
+{
+	*parts = NULL;
+	const char *h, *b;
+	size_t hl, bl;
+	split_entity(raw, len, &h, &hl, &b, &bl);
+	char *ct = hdr_get(h, hl, "Content-Type");
+	char *bd = ct ? param_get(ct, "boundary") : NULL;
+	span_t *sp = NULL;
+	int n = bd ? split_multipart(b, bl, bd, &sp) : 0;
+	free(ct);
+	free(bd);
+	if (n) {
+		*parts = xcalloc((size_t)n, sizeof **parts);
+		for (int i = 0; i < n; i++) (*parts)[i] = (mime_span){sp[i].p, sp[i].len};
+	}
+	free(sp);
+	return n;
+}
+
+void mime_body_of(const char *p, size_t len, const char **body, size_t *blen)
+{
+	const char *h;
+	size_t hl;
+	split_entity(p, len, &h, &hl, body, blen);
+}
+
 static char *part_type(span_t s)
 {
 	const char *h, *b;
@@ -521,6 +548,12 @@ static char *part_type(span_t s)
 }
 
 static void render_part(buf_t *out, const char *p, size_t len, int depth);
+
+/* The parts PGP/MIME adds: a signature, the version of an encrypted one. */
+static int pgp_part(const char *type)
+{
+	return !strcmp(type, "application/pgp-signature") || !strcmp(type, "application/pgp-encrypted");
+}
 
 int mime_looks_like_html(const char *s, size_t n)
 {
@@ -684,7 +717,9 @@ static void render_part(buf_t *out, const char *p, size_t len, int depth)
 
 	if (cte) str_lower(cte);
 
-	if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
+	if (pgp_part(type)) {
+		/* the signature, "Version: 1": nothing to show */
+	} else if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
 		char *boundary = param_get(ct, "boundary");
 		span_t *parts = NULL;
 		int n = boundary ? split_multipart(b, bl, boundary, &parts) : 0;
@@ -835,7 +870,9 @@ static void collect_atts(const char *p, size_t len, int depth, mime_att **out, i
 	char *disp = hdr_get(h, hl, "Content-Disposition");
 	int attachment = disp && !strncasecmp(disp, "attachment", 10);
 
-	if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
+	if (pgp_part(type)) {
+		/* PGP/MIME's signature and version part: not attachments */
+	} else if (!strncmp(type, "multipart/", 10) && depth < MAX_DEPTH) {
 		char *boundary = param_get(ct, "boundary");
 		span_t *parts = NULL;
 		int k = boundary ? split_multipart(b, bl, boundary, &parts) : 0;
@@ -1090,7 +1127,8 @@ char *mime_addr_display(const char *v)
 static int shown_type(const char *t, size_t n)
 {
 	static const char *const ok[] = {"text/plain", "text/html", "text/markdown", "text/x-markdown",
-	                                 "message/rfc822", NULL};
+	                                 "message/rfc822", "application/pgp-signature",
+	                                 "application/pgp-encrypted", NULL};
 	if (n >= 10 && !strncasecmp(t, "multipart/", 10)) return 1;
 	for (int i = 0; ok[i]; i++)
 		if (strlen(ok[i]) == n && !strncasecmp(t, ok[i], n)) return 1;
@@ -1103,7 +1141,7 @@ int mime_has_attachment(const char *raw, size_t len)
 	int top = 1, mixed = 0;
 	while (i < len) {
 		/* one header block: the message's, or a part's after a boundary */
-		int disp_att = 0, disp_inline = 0, cid = 0, other = 0, blank = 0;
+		int disp_att = 0, disp_inline = 0, cid = 0, other = 0, blank = 0, pgp = 0;
 		while (i < len) {
 			size_t e = i;
 			while (e < len && raw[e] != '\n') e++;
@@ -1119,6 +1157,10 @@ int mime_has_attachment(const char *raw, size_t len)
 				while (v + tn < l + ll && v[tn] != ';' && v[tn] != ' ' && v[tn] != '\t') tn++;
 				if (!shown_type(v, tn)) other = 1;
 				if (top && tn == 15 && !strncasecmp(v, "multipart/mixed", 15)) mixed = 1;
+				/* PGP/MIME: the signature is no attachment; what is
+				 * inside an encrypted message is not known */
+				if (tn > 16 && !strncasecmp(v, "application/pgp-", 16)) pgp = 1;
+				if (top && tn == 19 && !strncasecmp(v, "multipart/encrypted", 19)) return 0;
 			} else if (ll > 20 && !strncasecmp(l, "Content-Disposition:", 20)) {
 				const char *v = l + 20;
 				while (v < l + ll && (*v == ' ' || *v == '\t')) v++;
@@ -1130,7 +1172,7 @@ int mime_has_attachment(const char *raw, size_t len)
 		}
 		/* an attachment: so marked, or a part that is not text and not
 		 * an inline picture of an HTML text (those have a Content-ID) */
-		if (disp_att || (other && !disp_inline && !cid)) return 1;
+		if (!pgp && (disp_att || (other && !disp_inline && !cid))) return 1;
 		if (top && !blank) return 0;
 		if (top && i >= len) return mixed;      /* only the header was there */
 		top = 0;

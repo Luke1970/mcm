@@ -46,6 +46,8 @@ static int att_dir(char *dir, size_t n)
 	return stat(dir, &st) == 0 && S_ISDIR(st.st_mode) ? 0 : -1;
 }
 
+int att_private_dir(char *dir, size_t n) { return att_dir(dir, n); }
+
 void att_cleanup(void)
 {
 	char dir[1024];
@@ -152,8 +154,7 @@ static int att_list(att_t **out)
 	free(parts);
 	/* local mail and POP3: the raw message, parsed here */
 	buf_t raw = {0};
-	imap_partial_t req = {.section = "", .off = 0, .len = (size_t)-1 / 2, .out = &raw};
-	if (store_fetch_partial(A.im, A.mv.uid, &req, 1) != 0) {
+	if (mv_raw(&A.mv, A.im, &raw) != 0) {               /* (decrypted, if it was encrypted) */
 		set_status("Error: %s", store_error(A.im));
 		buf_free(&raw);
 		return -1;
@@ -473,4 +474,19 @@ void att_open_shown(int k, const char *name, const char *item)
 	for (int j = 0; j < n; j++) free(items[j]);
 	free(items);
 	att_release();
+}
+
+/* E (a draft): write an attachment of the draft into the private folder
+ * (see att_dir; emptied when mcm ends), so that an Attach: line can name
+ * it. *out: its path. */
+int att_temp_file(const char *name, const char *data, size_t len, char *out, size_t n)
+{
+	char dir[1024];
+	if (att_dir(dir, sizeof dir) != 0) return -1;
+	att_t a = {.name = (char *)name, .data = (char *)data, .len = len};
+	buf_t p = {0};
+	int rc = att_write(&a, dir, &p);
+	if (rc == 0) snprintf(out, n, "%s", p.d);
+	buf_free(&p);
+	return rc;
 }

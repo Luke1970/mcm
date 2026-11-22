@@ -802,7 +802,8 @@ typedef struct {
 } field_t;
 
 static const char *const UNIQUE[] = {"From", "Sender", "Reply-To", "To", "Cc", "Bcc", "Subject",
-                                     "Date", "Message-ID", "In-Reply-To", "References", NULL};
+                                     "Date", "Message-ID", "In-Reply-To", "References", "PGP",
+                                     NULL};
 static const char *const GENERATED[] = {"MIME-Version", "Content-Type", "Content-Transfer-Encoding",
                                         "Content-Disposition", "Content-ID", "User-Agent",
                                         "Return-Path", "Received", NULL};
@@ -1011,6 +1012,36 @@ void compose_out_free(compose_out *o)
 #define NADDR 6
 static const char *const ADDR_HDRS[NADDR] = {"From", "Sender", "Reply-To", "To", "Cc", "Bcc"};
 
+int compose_pgp_parse(const char *v, int *how)
+{
+	*how = 0;
+	while (*v) {
+		while (*v && strchr(" ,+\t", *v)) v++;
+		size_t n = 0;
+		while (v[n] && !strchr(" ,+\t", v[n])) n++;
+		if (!n) break;
+		char w[16];
+		snprintf(w, sizeof w, "%.*s", (int)(n < 15 ? n : 15), v);
+		if (!strcasecmp(w, "sign") || !strcasecmp(w, "signed")) *how |= COMPOSE_SIGN;
+		else if (!strcasecmp(w, "encrypt") || !strcasecmp(w, "encrypted")) *how |= COMPOSE_ENCRYPT;
+		else if (strcasecmp(w, "no") && strcasecmp(w, "none") && strcasecmp(w, "off") &&
+		         strcasecmp(w, "yes") && strcasecmp(w, "on"))
+			return -1;
+		v += n;
+	}
+	return 0;
+}
+
+/* The addresses of address list a (malloc'd strings) appended to *v. */
+static void addr_list(const alist_t *a, char ***v, int *n)
+{
+	for (int i = 0; i < a->n; i++)
+		for (int k = 0; k < a->e[i].n; k++) {
+			*v = xrealloc(*v, sizeof **v * (size_t)(*n + 1));
+			(*v)[(*n)++] = addr_str(&a->e[i].m[k]);
+		}
+}
+
 int compose_build(const char *text, size_t len, const compose_opts *o, compose_out *out)
 {
 	memset(out, 0, sizeof *out);
@@ -1157,6 +1188,20 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 		}
 	}
 
+	/* PGP: sign, encrypt (pgp.c does it) */
+	int pgp_how = 0;
+	field_t *fpgp = find(f, nf, "PGP");
+	if (fpgp && compose_pgp_parse(fpgp->value, &pgp_how) != 0) {
+		fail(out, fpgp->line, "PGP: write sign, encrypt, or both (or leave it empty)");
+		goto done;
+	}
+	if (pgp_how && !o->pgp_ok && !o->draft) {
+		fail(out, fpgp->line, "PGP: PGP is off for this account (Config, Account); "
+		                      "empty the PGP: line");
+		goto done;
+	}
+	out->pgp = pgp_how;
+
 	field_t *fsub = find(f, nf, "Subject");
 	out->no_subject = !fsub || !*fsub->value;
 	out->subject = xstrdup(fsub ? fsub->value : "");
@@ -1210,6 +1255,15 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 	if (ascii && !ctl && maxl <= LINE_MAX_) cte = "7bit";
 	else if (!ctl && maxl <= LINE_MAX_ && (o->eightbit || utf8)) cte = "8bit";
 	else cte = "quoted-printable";
+	/* signed text must arrive as it was signed: 7bit and no spaces at the
+	 * ends of lines (RFC 3156 3), else quoted-printable */
+	if ((pgp_how & COMPOSE_SIGN) && !o->draft && strcmp(cte, "quoted-printable")) {
+		int trail = strcmp(cte, "7bit") != 0;
+		for (size_t i = 0; i + 1 <= blen && !trail; i++)
+			if ((body[i] == ' ' || body[i] == '\t') && (i + 1 == blen || body[i + 1] == '\n' || body[i + 1] == '\r'))
+				trail = 1;
+		if (trail) cte = "quoted-printable";
+	}
 	out->eightbit = !strcmp(cte, "8bit");
 	out->smtputf8 = utf8;
 
@@ -1255,6 +1309,67 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 	if (fmid && *fmid->value) buf_adds(&mid, fmid->value);
 	else make_msgid(&mid, domain);
 
+	/* ---- the body entity (Content-* lines, blank line, text and
+	 * attachments): the same for both copies ---- */
+	buf_t ent = {0};
+	{
+		buf_t *b = &ent;
+		if (natt) {
+			buf_printf(b, "Content-Type: multipart/mixed;\r\n\tboundary=\"%s\"\r\n", boundary);
+			if (!strcmp(cte, "8bit")) buf_adds(b, "Content-Transfer-Encoding: 8bit\r\n");
+			buf_printf(b, "\r\nThis is a message in MIME format with %d attachment%s.\r\n"
+			              "\r\n--%s\r\n", natt, natt == 1 ? "" : "s", boundary);
+		}
+		buf_printf(b, "Content-Type: text/plain; charset=%s; format=flowed\r\n",
+		           ascii ? "us-ascii" : "utf-8");
+		buf_printf(b, "Content-Transfer-Encoding: %s\r\n\r\n", cte);
+
+		/* body */
+		size_t i = 0;
+		while (i < blen) {
+			const char *e = memchr(body + i, '\n', blen - i);
+			size_t n = e ? (size_t)(e - (body + i)) : blen - i;
+			size_t m = n;
+			if (m && body[i + m - 1] == '\r') m--;
+			if (!strcmp(cte, "quoted-printable")) {
+				qp_line(b, body + i, m);
+			} else {
+				buf_add(b, body + i, m);
+				buf_adds(b, "\r\n");
+			}
+			i += n + 1;
+		}
+		if (blen == 0) buf_adds(b, "\r\n");
+		for (int k = 0; k < natt; k++) write_attachment(b, &atts[k], boundary);
+		if (natt) buf_printf(b, "\r\n--%s--\r\n", boundary);
+	}
+	if (pgp_how && o->pgp && !o->draft) {
+		char **rc = NULL, **hid = NULL;
+		int nrc = 0, nhid = 0;
+		addr_list(to, &rc, &nrc);
+		addr_list(cc, &rc, &nrc);
+		addr_list(bcc, &hid, &nhid);
+		buf_t wrapped = {0};
+		char err[512];
+		int r = o->pgp(o->pgp_ctx, pgp_how, &ent, (const char *const *)rc, nrc,
+		               (const char *const *)hid, nhid, &wrapped, err, sizeof err);
+		for (int i = 0; i < nrc; i++) free(rc[i]);
+		for (int i = 0; i < nhid; i++) free(hid[i]);
+		free(rc);
+		free(hid);
+		if (r != 0) {
+			buf_free(&wrapped);
+			buf_free(&ent);
+			buf_free(&mid);
+			fail(out, fpgp->line, "%s", err);
+			goto done;
+		}
+		buf_free(&ent);
+		ent = wrapped;
+		out->eightbit = 0;
+		out->pgp_done = 1;
+	}
+
 	for (int pass = 0; pass < 2; pass++) {
 		buf_t *b = pass ? &out->copy : &out->msg;
 		hw_t w;
@@ -1292,40 +1407,19 @@ int compose_build(const char *text, size_t len, const compose_opts *o, compose_o
 			hw_text(&w, f[i].value, utf8);
 			hw_end(&w);
 		}
+		if (o->draft && fpgp && *fpgp->value) {     /* E restores it */
+			hw_start(&w, b, "X-Mcm-PGP");
+			hw_text(&w, fpgp->value, 1);
+			hw_end(&w);
+		}
 		hw_start(&w, b, "User-Agent");
 		hw_text(&w, o->user_agent, 1);
 		hw_end(&w);
 		buf_adds(b, "MIME-Version: 1.0\r\n");
-		if (natt) {
-			buf_printf(b, "Content-Type: multipart/mixed;\r\n\tboundary=\"%s\"\r\n", boundary);
-			if (!strcmp(cte, "8bit")) buf_adds(b, "Content-Transfer-Encoding: 8bit\r\n");
-			buf_printf(b, "\r\nThis is a message in MIME format with %d attachment%s.\r\n"
-			              "\r\n--%s\r\n", natt, natt == 1 ? "" : "s", boundary);
-		}
-		buf_printf(b, "Content-Type: text/plain; charset=%s; format=flowed\r\n",
-		           ascii ? "us-ascii" : "utf-8");
-		buf_printf(b, "Content-Transfer-Encoding: %s\r\n\r\n", cte);
-
-		/* body */
-		size_t i = 0;
-		while (i < blen) {
-			const char *e = memchr(body + i, '\n', blen - i);
-			size_t n = e ? (size_t)(e - (body + i)) : blen - i;
-			size_t m = n;
-			if (m && body[i + m - 1] == '\r') m--;
-			if (!strcmp(cte, "quoted-printable")) {
-				qp_line(b, body + i, m);
-			} else {
-				buf_add(b, body + i, m);
-				buf_adds(b, "\r\n");
-			}
-			i += n + 1;
-		}
-		if (blen == 0) buf_adds(b, "\r\n");
-		for (int k = 0; k < natt; k++) write_attachment(b, &atts[k], boundary);
-		if (natt) buf_printf(b, "\r\n--%s--\r\n", boundary);
+		buf_add(b, ent.d, ent.len);
 	}
 	buf_free(&mid);
+	buf_free(&ent);
 
 	/* RFC 5322 2.1.1: no line may exceed 998 octets */
 	const char *p = out->msg.d, *end = out->msg.d + out->msg.len;
@@ -1369,16 +1463,34 @@ done:
 
 char *compose_addrs(const char *raw, const char *skip)
 {
+	return compose_addrs_skip(raw, skip);
+}
+
+char *compose_addrs_skip(const char *raw, const char *skip_list)
+{
 	if (!raw) return NULL;
-	alist_t a;
+	alist_t a, sk = {0};
 	char err[256];
 	if (parse_alist(raw, &a, 1, err, sizeof err) < 0) return NULL;
+	int have_skip = skip_list && *skip_list && parse_alist(skip_list, &sk, 1, err, sizeof err) == 0;
 	buf_t b = {0};
+	char **seen = NULL;
+	int nseen = 0;
 	for (int i = 0; i < a.n; i++)
 		for (int j = 0; j < a.e[i].n; j++) {
 			mbox_t *m = &a.e[i].m[j];
 			char *as = addr_str(m);
-			if (skip && !strcasecmp(as, skip)) { free(as); continue; }
+			int drop = 0;
+			for (int s = 0; s < nseen && !drop; s++) drop = !strcasecmp(seen[s], as);   /* twice */
+			for (int x = 0; have_skip && x < sk.n && !drop; x++)
+				for (int y = 0; y < sk.e[x].n && !drop; y++) {
+					char *ss = addr_str(&sk.e[x].m[y]);
+					drop = !strcasecmp(ss, as);
+					free(ss);
+				}
+			if (drop) { free(as); continue; }
+			seen = xrealloc(seen, sizeof *seen * (size_t)(nseen + 1));
+			seen[nseen++] = xstrdup(as);
 			if (b.len) buf_adds(&b, ", ");
 			if (m->name && *m->name) {
 				int atoms = 1;
@@ -1400,6 +1512,9 @@ char *compose_addrs(const char *raw, const char *skip)
 			free(as);
 		}
 	alist_free(&a);
+	if (have_skip) alist_free(&sk);
+	for (int s = 0; s < nseen; s++) free(seen[s]);
+	free(seen);
 	if (!b.len) { buf_free(&b); return NULL; }
 	return buf_steal(&b);
 }

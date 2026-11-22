@@ -46,6 +46,12 @@ void mime_att_free(mime_att *a, int n);
  * only the header: multipart/mixed counts. */
 int  mime_has_attachment(const char *raw, size_t len);
 
+/* The parts of a multipart entity (header block and body), in order. */
+typedef struct { const char *p; size_t len; } mime_span;
+int  mime_split(const char *raw, size_t len, mime_span **parts);
+/* The body of an entity (after its header block). */
+void mime_body_of(const char *p, size_t len, const char **body, size_t *blen);
+
 /* Undo a Content-Transfer-Encoding (base64, quoted-printable, else as is). */
 char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outlen);
 

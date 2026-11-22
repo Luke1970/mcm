@@ -159,6 +159,7 @@ int handle_key(int ch)
 	case 't': case 'T': msg_toggle_plain(); return 1;
 	case 'k': case 'K': links_window(0); return 1;
 	case 'm': case 'M': compose_start('m'); return 1;
+	case 'e': case 'E': compose_draft(); return 1;
 	case 'r': case 'R': compose_start('r'); return 1;
 	case 'f': case 'F': compose_start('f'); return 1;
 	case 'c': case 'C': config_menu(); return 1;

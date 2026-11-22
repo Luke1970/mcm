@@ -13,6 +13,9 @@ static int keep_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg, size_t ml);
 static void add_hdr(buf_t *b, const char *name, const char *v);
 static void quote_flowed(buf_t *t, const char *l, size_t n);
+static int pgp_cb(void *ctx, int how, const buf_t *ent, const char *const *rc, int nrc,
+                  const char *const *hid, int nh, buf_t *out, char *err, size_t el);
+static void pgp_line(buf_t *t, int encrypt);
 
 /* From: "Full Name <address>", the name quoted when it needs to be. */
 static void from_line(char *out, size_t n)
@@ -90,7 +93,7 @@ static int keep_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 {
 	compose_ctx *c = ctx;
 	compose_opts o = {.user_agent = USER_AGENT, .auto_date = c->auto_date,
-	                  .smtputf8 = 1, .eightbit = 1, .draft = 1};
+	                  .smtputf8 = 1, .eightbit = 1, .draft = 1, .pgp_ok = pgp_on(ac)};
 	compose_out out;
 	if (compose_build(text, len, &o, &out) != 0) {
 		snprintf(msg, ml, "%s", out.err);
@@ -113,7 +116,7 @@ static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 {
 	compose_ctx *c = ctx;
 	compose_opts o = {.user_agent = USER_AGENT, .auto_date = c->auto_date,
-	                  .smtputf8 = 1, .eightbit = 1};
+	                  .smtputf8 = 1, .eightbit = 1, .pgp_ok = pgp_on(ac)};
 	compose_out out;
 
 	/* 1. syntax check before anything goes over the network */
@@ -125,8 +128,8 @@ static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 	char who[300] = "";
 	for (int i = 0; i < out.nrcpt && strlen(who) < 200; i++)
 		snprintf(who + strlen(who), sizeof who - strlen(who), "%s%s", i ? ", " : "", out.rcpt[i]);
-	char q[4][400];
-	const char *ql[4];
+	char q[5][400];
+	const char *ql[5];
 	int nq = 0;
 	snprintf(q[nq], sizeof q[0], "Send to %s%s?", who, strlen(who) >= 200 ? " ..." : "");
 	ql[nq] = q[nq];
@@ -144,6 +147,14 @@ static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 		ql[nq] = q[nq];
 		nq++;
 	}
+	int pgp = out.pgp;
+	if (pgp) {
+		snprintf(q[nq], sizeof q[0], "%s with PGP%s.",
+		         pgp == (PGP_SIGN | PGP_ENCRYPT) ? "Signed and encrypted" : pgp == PGP_SIGN ? "Signed" : "Encrypted",
+		         pgp & PGP_ENCRYPT ? " (the subject is not encrypted)" : "");
+		ql[nq] = q[nq];
+		nq++;
+	}
 	char me[512];
 	login_address(me, sizeof me);
 	if (strcasecmp(out.mail_from, me)) {
@@ -157,6 +168,19 @@ static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 	static const ui_menuitem yn[] = {{"Send", 0, 's'}, {"Cancel", 0, 'c'}};
 	if (ui_choice_dialog("Send message", ql, nq, yn, 2, 0, 0, editor_redraw) != 0)
 		return 0;
+
+	/* PGP before connecting: the passphrase, keys that are missing */
+	compose_out pout = {0};
+	if (pgp) {
+		compose_opts po = o;
+		po.pgp = pgp_cb;
+		po.eightbit = 0;
+		if (compose_build(text, len, &po, &pout) != 0) {
+			snprintf(msg, ml, "Not sent: %s", pout.err);
+			*line = pout.err_line;
+			return 0;
+		}
+	}
 
 	/* 2. connect */
 	smtp_derive();
@@ -184,14 +208,24 @@ static int send_cb(void *ctx, const char *text, size_t len, int *line, char *msg
 		if (s) break;
 		if (smtp_settings(err, editor_redraw) != 0) {
 			snprintf(msg, ml, "Not sent: %s", err);
+			if (pgp) compose_out_free(&pout);
 			return 0;
 		}
 	}
 
-	/* 3. build for this server: SMTPUTF8 / 8BITMIME decide the encodings */
+	/* 3. build for this server: SMTPUTF8 / 8BITMIME decide the encodings
+	 * (signed or encrypted: done already, 7bit) */
 	o.smtputf8 = caps.smtputf8;
 	o.eightbit = caps.eightbitmime;
-	if (compose_build(text, len, &o, &out) != 0) {
+	if (pgp) {
+		out = pout;
+		if (out.smtputf8 && !caps.smtputf8) {
+			smtp_close(s);
+			compose_out_free(&out);
+			snprintf(msg, ml, "Not sent: the server does not accept non-ASCII addresses (SMTPUTF8)");
+			return 0;
+		}
+	} else if (compose_build(text, len, &o, &out) != 0) {
 		smtp_close(s);
 		snprintf(msg, ml, "Not sent: %s", out.err);
 		*line = out.err_line;
@@ -269,6 +303,27 @@ static void quote_flowed(buf_t *t, const char *l, size_t n)
 	}
 }
 
+static int pgp_cb(void *ctx, int how, const buf_t *ent, const char *const *rc, int nrc,
+                  const char *const *hid, int nh, buf_t *out, char *err, size_t el)
+{
+	(void)ctx;
+	char key[300];
+	pgp_key(ac, key, sizeof key);
+	return pgp_wrap(how, key, ent, rc, nrc, hid, nh, out, err, el);
+}
+
+/* The PGP: line of new mail (an account with PGP on): what mcm.conf says
+ * new mail gets; encrypt as well when answering an encrypted message. */
+static void pgp_line(buf_t *t, int encrypt)
+{
+	if (!pgp_on(ac)) return;
+	int how = 0;
+	if (compose_pgp_parse(ac->pgp, &how) != 0) how = 0;
+	if (encrypt) how |= PGP_ENCRYPT;
+	add_hdr(t, "PGP", how == (PGP_SIGN | PGP_ENCRYPT) ? "sign encrypt" : how == PGP_SIGN ? "sign"
+	                  : how == PGP_ENCRYPT ? "encrypt" : "");
+}
+
 /* Start the editor: 'm' new mail, 'r' reply, 'f' forward. */
 void compose_start(int kind)
 {
@@ -301,14 +356,34 @@ void compose_start(int kind)
 		char *fr = mime_header_raw(ohdr, ohlen, "From");
 		char *to = compose_addrs(rt ? rt : fr, NULL);
 		add_hdr(&t, "To", to);
+		/* reply to all: the original's other recipients in Cc, without you
+		 * and without those already in To ([X] / Ctrl-X empties Cc) */
+		char *oto = mime_header_raw(ohdr, ohlen, "To"), *occ = mime_header_raw(ohdr, ohlen, "Cc");
+		char own[512];
+		login_address(own, sizeof own);
+		buf_t all = {0}, skip = {0};
+		if (oto && *oto) buf_adds(&all, oto);
+		if (occ && *occ) buf_printf(&all, "%s%s", all.len ? ", " : "", occ);
+		if (to) buf_adds(&skip, to);
+		if (*own) buf_printf(&skip, "%s%s", skip.len ? ", " : "", own);
+		if (ac && *ac->user && strchr(ac->user, '@'))
+			buf_printf(&skip, "%s%s", skip.len ? ", " : "", ac->user);
+		char *cc = all.len ? compose_addrs_skip(all.d, skip.len ? skip.d : NULL) : NULL;
+		add_hdr(&t, "Cc", cc ? cc : "");
+		free(cc);
+		buf_free(&all);
+		buf_free(&skip);
+		free(oto);
+		free(occ);
 		free(to);
 		free(rt);
 		free(fr);
 	} else {
 		add_hdr(&t, "To", "");
 	}
-	add_hdr(&t, "Cc", "");
+	if (kind != 'r') add_hdr(&t, "Cc", "");
 	add_hdr(&t, "Bcc", "");
+	pgp_line(&t, kind != 'm' && A.mv.open && A.mv.pgp_enc);
 
 	char *osub = kind != 'm' ? mime_header(ohdr, ohlen, "Subject") : NULL;
 	if (kind == 'r') {
@@ -409,4 +484,118 @@ void compose_start(int kind)
 	editor_run(&ec, buf_cstr(&t), start);
 	buf_free(&t);
 	focus_to(COL_LIST);            /* back to the email list and the message */
+}
+
+/* E in the Drafts folder: open the draft in the editor again, with its
+ * To, Cc, Bcc, Subject, text and attachments (written to the private
+ * attachment folder and named in Attach: lines). Keep saves a new draft;
+ * the old one stays in Drafts. */
+void compose_draft(void)
+{
+	const folder_t *df = special_folder(FOLDER_DRAFTS);
+	if (A.cur_folder < 0 || df != &A.folders[A.cur_folder]) {
+		set_status("%s", "E opens a draft again: open the Drafts folder first");
+		return;
+	}
+	const msg_t *m = msg_at(A.msel);
+	if (!m || !m->uid) {
+		set_status("%s", "Select a draft first");
+		return;
+	}
+	now_status("Loading the draft ...");
+	buf_t raw = {0};
+	imap_partial_t req = {.section = "", .off = 0, .len = 0x7fffffff, .out = &raw};
+	if (store_fetch_partial(A.im, m->uid, &req, 1) != 0) {
+		set_status("Error: %s", store_error(A.im));
+		buf_free(&raw);
+		return;
+	}
+	const char *r = raw.d ? raw.d : "";
+	const char *he = strstr(r, "\r\n\r\n"), *he2 = strstr(r, "\n\n");
+	size_t hlen = he && (!he2 || he < he2) ? (size_t)(he - r) + 4 : he2 ? (size_t)(he2 - r) + 2 : raw.len;
+
+	compose_ctx c = {0};
+	snprintf(c.auto_date, sizeof c.auto_date, "%s", compose_date(time(NULL)));
+	char from[800];
+	from_line(from, sizeof from);
+	buf_t t = {0};
+	char *dfrom = *from ? NULL : mime_header(r, hlen, "From");   /* no address here: the draft's */
+	add_hdr(&t, "From", dfrom ? dfrom : from);
+	if (dfrom && *dfrom) snprintf(from, sizeof from, "%s", dfrom);
+	free(dfrom);
+	static const char *const addr_h[] = {"To", "Cc", "Bcc"};
+	for (int i = 0; i < 3; i++) {
+		char *v = mime_header_raw(r, hlen, addr_h[i]);
+		char *a = v && *v ? compose_addrs(v, NULL) : NULL;
+		/* an address that cannot be parsed (a draft may hold one): as written */
+		char *shown = a ? a : v && *v ? mime_header(r, hlen, addr_h[i]) : NULL;
+		add_hdr(&t, addr_h[i], shown ? shown : "");
+		if (shown != a) free(shown);
+		free(a);
+		free(v);
+	}
+	char *xp = mime_header(r, hlen, "X-Mcm-PGP");    /* the draft's PGP: line */
+	if (xp && *xp) add_hdr(&t, "PGP", xp);
+	else pgp_line(&t, 0);
+	free(xp);
+	char *sub = mime_header(r, hlen, "Subject");
+	add_hdr(&t, "Subject", sub ? sub : "");
+	free(sub);
+	add_hdr(&t, "Date", c.auto_date);
+	static const char *const keep_h[] = {"In-Reply-To", "References", NULL};
+	for (int i = 0; keep_h[i]; i++) {
+		char *v = mime_header_raw(r, hlen, keep_h[i]);
+		if (v && *v) add_hdr(&t, keep_h[i], v);
+		free(v);
+	}
+
+	/* the attachments: files again */
+	mime_att *atts;
+	int na = mime_attachments(r, raw.len, &atts), lost = 0;
+	for (int i = 0; i < na; i++) {
+		char path[1200];
+		if (att_temp_file(atts[i].name, atts[i].data, atts[i].len, path, sizeof path) == 0)
+			add_hdr(&t, "Attach", path);
+		else
+			lost++;
+	}
+	buf_addc(&t, '\n');
+
+	/* the text, without the [Attachment: ...] lines the rendering adds */
+	char *body = mime_render_body(r, raw.len);
+	for (const char *p = body ? body : ""; *p;) {
+		const char *e = strchr(p, '\n');
+		size_t n = e ? (size_t)(e - p) : strlen(p);
+		if (!(na && n > 14 && !strncmp(p, "[Attachment: ", 13) && p[n - 1] == ']')) {
+			buf_add(&t, p, n);
+			buf_addc(&t, '\n');
+		}
+		p += n + (e ? 1 : 0);
+	}
+	free(body);
+	mime_att_free(atts, na);
+	buf_free(&raw);
+	while (t.len >= 2 && t.d[t.len - 1] == '\n' && t.d[t.len - 2] == '\n') t.len--;
+	if (t.len && t.d[t.len - 1] == '\n') t.len--;
+
+	{
+		size_t cl;
+		char *ct = utf8_clean(t.d ? t.d : "", t.len, &cl);
+		buf_free(&t);
+		buf_add(&t, ct, cl);
+		free(ct);
+	}
+	if (lost) set_status("%d attachment%s of the draft could not be written", lost, lost == 1 ? "" : "s");
+	else set_status("%s", "");
+	editor_cfg ec = {
+		.title = "Draft",
+		.send = send_cb,
+		.keep = keep_cb,
+		.ctx = &c,
+		.wrap = 1,
+		.wrap_width = wrap_width,
+	};
+	editor_run(&ec, buf_cstr(&t), *from ? 1 : 0);
+	buf_free(&t);
+	focus_to(COL_LIST);
 }

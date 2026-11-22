@@ -37,7 +37,7 @@ static const mitem M_LIST[] = {
 	{"fiLter", 2, 'l'}, {"Other", 0, 'o'},
 };
 static const mitem M_MSG[] = {
-	{"/ find", 0, DO_FIND}, {"Fwd", 0, 'f'}, {"Header", 0, 'h'}, {"heX", 2, 'x'}, {"Mail", 0, 'm'},
+	{"/ find", 0, DO_FIND}, {"edit draft", -1, 'e'}, {"Fwd", 0, 'f'}, {"Header", 0, 'h'}, {"heX", 2, 'x'}, {"Mail", 0, 'm'},
 	{"Print", 0, 'p'}, {"Reply", 0, 'r'}, {"Save", 0, 's'}, {"Wrap", 0, 'w'},
 };
 static const mitem M_HELP[] = {
