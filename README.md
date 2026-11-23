@@ -83,8 +83,9 @@ Ready-made programs are on the
   cd mcm-0.996-linux-x86_64 && ./mcm
   ```
 
-  `INSTALL.txt` in it says how to install it in `/usr/local`.
-- **Windows**: `mcm.zip`, also at <https://sc00by.nl/lucien/mcm/mcm.zip>.
+  `INSTALL.txt` in it says how to install it in `/usr/local`. Also at
+  <https://sc00by.nl/software/mcm/>.
+- **Windows**: `mcm.zip`, also at <https://sc00by.nl/software/mcm/mcm.zip>.
 
 ## Build
 
@@ -1382,7 +1383,7 @@ they follow the terminal's own palette). The older names `amber`, `green`,
 
 mcm runs on Windows 10 and 11 in the console: Windows Terminal, or cmd.exe
 in the classic console window. A ready-made zip is at
-<https://sc00by.nl/lucien/mcm/mcm.zip>; to build it yourself see
+<https://sc00by.nl/software/mcm/mcm.zip>; to build it yourself see
 [Build, Windows 10 and 11](#windows-10-and-11).
 
 ### Installing
