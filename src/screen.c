@@ -441,7 +441,7 @@ static void draw_statusbar(void)
 			tw += w > 0 ? w : 0;
 			i += cl;
 		}
-		ui_puts(y, lw + 1, msg, tw + 1 < COLS - lw - 1 ? tw + 1 : COLS - lw - 1, A_BOLD, CP_HIGHLIGHT);
+		ui_puts(y, lw + 1, msg, tw + 1 < COLS - lw - 1 ? tw + 1 : COLS - lw - 1, A_BOLD, CP_NOTICE);
 	}
 }
 

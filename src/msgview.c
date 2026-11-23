@@ -124,6 +124,13 @@ static void pgp_subst(const msgview_t *mv, char **t, size_t *n)
 	}
 }
 
+/* mime_text_part's hook: inline PGP blocks replaced (in plain text) */
+static void pgp_hook(void *ctx, char **t, size_t *n)
+{
+	drop_cr(*t, n);
+	pgp_subst(ctx, t, n);
+}
+
 static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 {
 	mv_leaf *l = find_leaf(mv, p);
@@ -156,26 +163,17 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 		buf_adds(out, t);
 		free(t);
 	} else {
+		/* the same text pipeline as mime_render (mime.c) */
+		mime_textopt o = {
+			.kind = is(p, "text", "html") ? MIME_HTML : is_markdown(p) ? MIME_MARKDOWN : MIME_PLAIN,
+			.cte = p->cte, .charset = p->charset,
+			.flowed = p->flowed && is(p, "text", "plain"), .delsp = p->delsp,
+			.as_sent = mv->plain,
+			.hook = mv->npgp_blk ? pgp_hook : NULL, .ctx = mv,
+		};
+		if (o.flowed) mv->flowed = 1;
 		size_t n;
-		int kind = is(p, "text", "html") ? MIME_HTML : is_markdown(p) ? MIME_MARKDOWN : MIME_PLAIN;
-		char *t = mime_decode_text(data, l->raw.len, kind, p->cte, p->charset, &n);
-		if (kind == MIME_PLAIN && mv->npgp_blk) {
-			drop_cr(t, &n);
-			pgp_subst(mv, &t, &n);
-		}
-		if (p->flowed && is(p, "text", "plain")) {   /* RFC 3676: join soft breaks */
-			char *u = mime_unflow(t, n, p->delsp, &n);
-			free(t);
-			t = u;
-			mv->flowed = 1;
-		}
-		if (kind == MIME_PLAIN && !mv->plain) {   /* &#8204; and the like (mime.c does HTML); T: as sent */
-			buf_t v = {0};
-			strip_invisible(t, n, 1, &v);
-			free(t);
-			n = v.len;
-			t = v.d ? buf_steal(&v) : xstrdup("");
-		}
+		char *t = mime_text_part(data, l->raw.len, &o, &n);
 		add_clean(out, t, n);
 		free(t);
 	}
@@ -188,10 +186,6 @@ static void render_leaf(msgview_t *mv, mpart_t *p, buf_t *out)
 		buf_printf(out, "[... %s more - scroll down to load ...]\n", hs);
 	}
 }
-
-/* A text part this small (encoded octets) is empty: at most a line break
- * or two, also in base64. */
-#define EMPTY_PART 8
 
 /* The part of a multipart/alternative that is shown: the plain text, but
  * not an empty one (some newsletters send one, with all the text in the
@@ -207,11 +201,9 @@ static int alt_pick(const msgview_t *mv, const mpart_t *p)
 		else if (is(k, "text", "html") && html < 0) html = i;
 		else if (is(k, "multipart", NULL) && multi < 0) multi = i;
 	}
-	if (pick >= 0 && !mv->plain && (p->kids[pick].size <= EMPTY_PART || p->kids[pick].html_inside) &&
-	    html >= 0)
-		pick = html;
-	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
-	return pick;
+	/* the same rule as mime_render (mime.c) */
+	int poor = pick >= 0 && (p->kids[pick].size <= MIME_EMPTY_PART || p->kids[pick].html_inside);
+	return mime_alt_choose(pick, html, multi, poor, mv->plain);
 }
 
 /* Walk the structure. With out == NULL, only collect the displayed leaves. */
@@ -239,12 +231,10 @@ static void walk(msgview_t *mv, mpart_t *p, buf_t *out)
 			mv->leaves[mv->nleaves++] = (mv_leaf){.part = p};
 		}
 	} else if (out) {
-		char hs[32];
-		size_t sz = !strcmp(p->cte, "base64") ? (size_t)p->size * 3 / 4 : p->size;
-		mime_human_size(hs, sizeof hs, sz);
+		char type[100];
+		snprintf(type, sizeof type, "%s/%s", p->type, p->subtype);
 		ensure_nl(out);
-		buf_printf(out, "[Attachment: %s  (%s/%s, %s)]\n", p->name ? p->name : "(unnamed)",
-		           p->type, p->subtype, hs);
+		mime_att_line(out, p->name, type, p->size, p->cte);
 	}
 }
 
@@ -314,7 +304,7 @@ int mv_repick(msgview_t *mv, store_t *im)
 		mv_leaf *l = &mv->leaves[i];
 		if (!is(l->part, "text", "plain") || !l->raw.len || l->part->html_inside) continue;
 		size_t dn;
-		char *t = mime_decode_text(l->raw.d, l->raw.len, MIME_PLAIN, l->part->cte, l->part->charset, &dn);
+		char *t = mime_decode_text(l->raw.d, l->raw.len, l->part->cte, l->part->charset, &dn);
 		if (mime_plain_is_bad(t, dn)) {
 			l->part->html_inside = 1;
 			again = 1;
@@ -574,7 +564,7 @@ static void pgp_inline(msgview_t *mv)
 			n = strlen(t);
 			buf_free(&msg);
 		} else if (is(p, "text", "plain")) {
-			t = mime_decode_text(l->raw.d, l->raw.len, MIME_PLAIN, p->cte, p->charset, &n);
+			t = mime_decode_text(l->raw.d, l->raw.len, p->cte, p->charset, &n);
 			drop_cr(t, &n);
 		} else continue;
 		size_t pos = 0, al;
@@ -726,7 +716,13 @@ void mv_render(msgview_t *mv, int all_headers)
 		ensure_para(&out);
 		buf_printf(&out, "[PGP: %s]\n\n", mv->pgp_note);
 	}
+	textconv_styles(1);                  /* Markdown: bold, italic, ... marked */
 	walk(mv, mv->root ? mv->root : &mv->fallback, &out);
+	textconv_styles(0);
+	free(mv->sty);
+	mv->sty = NULL;
+	mv->nsty = 0;
+	if (out.d) out.len = ts_strip(out.d, out.len, &mv->sty, &mv->nsty, &mv->more_off);
 
 	/* trim trailing blank lines, but never cut into the "more" marker */
 	size_t min = mv->more_off == MV_NO_MORE ? 0 : mv->more_off;
@@ -783,6 +779,7 @@ void mv_close(msgview_t *mv)
 	free(mv->leaves);
 	free(mv->hdr);
 	free(mv->text);
+	free(mv->sty);
 	mpart_free(mv->root);
 	buf_free(&mv->hex);
 	free(mv->pgp_note);

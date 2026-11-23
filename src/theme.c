@@ -42,6 +42,30 @@
 #define DATADIR "/usr/local/share/mcm"
 #endif
 
+/* The themes directory next to the program (Linux), for mcm unpacked from
+ * the release tarball and run from there; "" when unknown. */
+static const char *exe_themes(void)
+{
+	static char dir[768];          /* room left for "/NAME.theme" in a path */
+#ifdef __linux__
+	static int done;
+	if (!done) {
+		done = 1;
+		char exe[700];
+		ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+		if (n > 0) {
+			exe[n] = '\0';
+			char *s = strrchr(exe, '/');
+			if (s) {
+				*s = '\0';
+				snprintf(dir, sizeof dir, "%s/themes", exe);
+			}
+		}
+	}
+#endif
+	return dir;
+}
+
 void theme_defaults(theme_t *t)
 {
 	/* PC Tools inspired: white on blue, cyan selection bar, gray menus */
@@ -184,6 +208,10 @@ char *theme_find(const char *name)
 	if (readable(p)) return xstrdup(p);
 	snprintf(p, sizeof p, "%s/themes/%s.theme", DATADIR, name);
 	if (readable(p)) return xstrdup(p);
+	if (*exe_themes()) {
+		snprintf(p, sizeof p, "%s/%s.theme", exe_themes(), name);
+		if (readable(p)) return xstrdup(p);
+	}
 	return NULL;
 }
 
@@ -240,6 +268,7 @@ char *theme_user_file(const char *name, int *created)
 	char src[1024];
 	snprintf(src, sizeof src, "themes/%s.theme", name);
 	if (!readable(src)) snprintf(src, sizeof src, "%s/themes/%s.theme", DATADIR, name);
+	if (!readable(src) && *exe_themes()) snprintf(src, sizeof src, "%s/%s.theme", exe_themes(), name);
 	if (readable(src)) {
 		if (copy_file(src, p) != 0) return NULL;
 	} else if (!strcmp(name, "default")) {
@@ -294,6 +323,7 @@ int theme_names(char ***out)
 	add_names("themes", &list, &n, &cap);
 	snprintf(p, sizeof p, "%s/themes", DATADIR);
 	add_names(p, &list, &n, &cap);
+	if (*exe_themes() && strcmp(exe_themes(), p)) add_names(exe_themes(), &list, &n, &cap);
 	if (n) qsort(list, (size_t)n, sizeof *list, cmp_name);
 	*out = list;
 	return n;
@@ -366,6 +396,13 @@ static int to_rgb(int c)
 	return c & THEME_RGB ? c & 0xffffff : c < 8 ? basic[c] : xterm_rgb(c);
 }
 
+/* Brightness 0-255 of theme color c (not "default"). */
+static int lum(int c)
+{
+	int rgb = to_rgb(c);
+	return (299 * (rgb >> 16 & 255) + 587 * (rgb >> 8 & 255) + 114 * (rgb & 255)) / 1000;
+}
+
 /* Theme color c (not "default") made darker: 60% of its brightness. */
 static int darker(int c)
 {
@@ -416,4 +453,8 @@ void theme_apply(const theme_t *t)
 	if (t->headerbg == THEME_AUTO && t->headertxt == THEME_AUTO && fit(hbg) == fit(t->background))
 		htx = COLOR_CYAN;
 	init_extended_pair(CP_HEADER, fit(htx), fit(hbg));
+	/* the new-mail notice: black or white on the highlight color, whichever
+	 * contrasts more (black on white where the highlight is the default) */
+	int nbg = t->highlightbg < 0 ? COLOR_WHITE : t->highlightbg;
+	init_extended_pair(CP_NOTICE, fit(THEME_RGB | (lum(nbg) > 140 ? 0x000000 : 0xffffff)), fit(nbg));
 }

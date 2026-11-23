@@ -14,6 +14,7 @@
 
 #include "store.h"
 #include "util.h"
+#include "textconv.h"
 
 #define MV_NO_MORE ((size_t)-1)
 
@@ -53,6 +54,8 @@ typedef struct {
 	/* rendered text */
 	char     *text;
 	size_t    textlen;
+	ts_span  *sty;           /* styled spans of text (Markdown: bold, italic, ...) */
+	int       nsty;
 	size_t    more_off;      /* offset of the first "more" marker, or MV_NO_MORE */
 	int       flowed;        /* a shown text part was format=flowed (unwrapped) */
 	size_t    hdr_end;       /* text before this offset is the header section */

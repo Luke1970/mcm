@@ -240,7 +240,8 @@ uint32_t cp1252_char(uint32_t c)
 	return c;
 }
 
-char *utf8_clean(const char *s, size_t n, size_t *outlen)
+/* utf8_clean and utf8_repair; controls: keep all control characters */
+static char *utf8_fix(const char *s, size_t n, size_t *outlen, int controls)
 {
 	buf_t b = {0};
 	const unsigned char *u = (const unsigned char *)s;
@@ -248,7 +249,7 @@ char *utf8_clean(const char *s, size_t n, size_t *outlen)
 	while (i < n) {
 		unsigned c = u[i];
 		if (c < 0x80) {
-			if (c == '\n' || c == '\t' || (c >= 0x20 && c != 0x7F)) buf_addc(&b, (char)c);
+			if (controls || c == '\n' || c == '\t' || (c >= 0x20 && c != 0x7F)) buf_addc(&b, (char)c);
 			i++;
 			continue;
 		}
@@ -276,6 +277,40 @@ char *utf8_clean(const char *s, size_t n, size_t *outlen)
 	if (outlen) *outlen = b.len;
 	if (!b.d) return xstrdup("");
 	return buf_steal(&b);
+}
+
+char *utf8_clean(const char *s, size_t n, size_t *outlen)
+{
+	return utf8_fix(s, n, outlen, 0);
+}
+
+/* Is s valid UTF-8 (no overlong forms, surrogates or C1 controls)? */
+static int utf8_ok(const unsigned char *u, size_t n)
+{
+	for (size_t i = 0; i < n; ) {
+		unsigned c = u[i];
+		if (c < 0x80) { i++; continue; }
+		size_t extra = (c & 0xE0) == 0xC0 ? 1 : (c & 0xF0) == 0xE0 ? 2 : (c & 0xF8) == 0xF0 ? 3 : 0;
+		if (!extra || i + extra >= n) return 0;      /* stray byte, or cut off */
+		uint32_t cp = c & (0x3F >> extra);
+		for (size_t k = 1; k <= extra; k++) {
+			if ((u[i + k] & 0xC0) != 0x80) return 0;
+			cp = (cp << 6) | (u[i + k] & 0x3F);
+		}
+		static const uint32_t min[4] = {0, 0x80, 0x800, 0x10000};
+		if (cp < min[extra] || cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) || cp < 0xA0) return 0;
+		i += extra + 1;
+	}
+	return 1;
+}
+
+char *utf8_repair(const char *s, size_t n, size_t *outlen)
+{
+	if (utf8_ok((const unsigned char *)s, n)) {
+		if (outlen) *outlen = n;
+		return xstrndup(s, n);
+	}
+	return utf8_fix(s, n, outlen, 1);
 }
 
 char *str_trim(char *s)

@@ -52,8 +52,7 @@
 #include <sys/wait.h>
 #endif
 
-#define MCM_VERSION   "0.995"
-#define POLL_SECONDS   60       /* check for new mail when idle */
+#define MCM_VERSION   "0.996"
 #define LOAD_DELAY_MS  200      /* load message after selection rests this long */
 #define CHUNK          100      /* message headers fetched per block */
 #define MAX_CHUNKS     64       /* header blocks kept in memory (least recently used dropped) */
@@ -109,6 +108,7 @@ extern char      *master;          /* master password, in memory only once typed
 
 /* Settings of the program (mcm.conf, before the accounts) */
 extern int wrap_width;             /* new mail is wrapped at this column */
+extern int check_mail;             /* seconds between checks for new mail when idle; 0 = only F5 */
 /* Programs from mcm.conf; empty: the default. pdf_viewer opens PDF files,
  * html_viewer web links (the editor: cfg_editor in ui.h). */
 extern char cfg_pdf_viewer[256], cfg_html_viewer[256];
@@ -261,6 +261,7 @@ int downloads_dir(char *dir, size_t n);
 FILE *new_file(buf_t *path, const char *ext);
 void save_message(int print);
 void handle_key_wrap(void);
+void handle_key_raw(void);    /* H: the raw message over the whole screen */
 int msg_colon(void);
 int msg_colon_with(const char *init);
 void links_window(int key);

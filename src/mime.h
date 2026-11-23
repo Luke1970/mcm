@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 #include <time.h>
+#include "util.h"
 
 /* Convert text in `charset` to UTF-8. Always returns a malloc'd NUL-terminated string. */
 char *conv_to_utf8(const char *charset, const char *in, size_t len, size_t *outlen);
@@ -58,8 +59,7 @@ char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outle
 /* Summary (From, To, Cc, Date, Subject) of a header block, ending in a blank line. */
 char *mime_summary(const char *hdr, size_t len);
 
-/* Decode one body part (transfer encoding + charset) to UTF-8; HTML and
- * Markdown are turned into plain text (textconv.h). */
+/* The kinds of text part that are shown. */
 enum { MIME_PLAIN, MIME_HTML, MIME_MARKDOWN };
 /* Does text s start (after blank lines) as an HTML page: <!DOCTYPE html or
  * <html? (Some newsletters send one as their plain-text version.) */
@@ -71,8 +71,39 @@ int mime_plain_is_bad(const char *s, size_t n);
  * choice; does the message have a plain-text part T can show? */
 void mime_set_plain(int on);
 int  mime_has_plain(const char *raw, size_t len);
-char *mime_decode_text(const char *data, size_t len, int kind, const char *cte,
+/* Undo the transfer encoding of a body part and convert it to UTF-8. */
+char *mime_decode_text(const char *data, size_t len, const char *cte,
                        const char *charset, size_t *outlen);
+
+/* One text part as it is shown. Both ways of showing a message use this:
+ * mime_render (the raw message) and msgview.c (the IMAP structure). Steps:
+ * transfer encoding, charset; HTML or Markdown to text; plain text:
+ * the hook (msgview.c: inline PGP), format=flowed, Markdown detected in it
+ * (md_detect), the characters that show nothing. as_sent (T): plain text
+ * only decoded and unflowed. Returns a malloc'd string (*outlen). */
+typedef struct {
+	int         kind;              /* MIME_PLAIN, MIME_HTML, MIME_MARKDOWN */
+	const char *cte, *charset;
+	int         flowed, delsp;     /* format=flowed; delsp=yes (plain only) */
+	int         as_sent;           /* T */
+	void      (*hook)(void *ctx, char **t, size_t *n);   /* plain, before unflowing */
+	void       *ctx;
+} mime_textopt;
+char *mime_text_part(const char *data, size_t len, const mime_textopt *o, size_t *outlen);
+
+/* Which part of a multipart/alternative is shown: the index of the plain
+ * text part (plain), html, multi (a multipart), -1 for none; plain_poor:
+ * the plain text is (nearly) empty, an HTML page or full of CSS; as_sent:
+ * T. The plain text, unless it is poor and there is HTML; else HTML, the
+ * multipart, the first. */
+int mime_alt_choose(int plain, int html, int multi, int plain_poor, int as_sent);
+/* Encoded size up to which a text part counts as empty (a line break or
+ * two, also in base64). */
+#define MIME_EMPTY_PART 8
+
+/* "[Attachment: name  (type, size)]\n"; size: the encoded size, cte its
+ * transfer encoding (base64 is counted as 3/4). */
+void mime_att_line(buf_t *out, const char *name, const char *type, size_t size, const char *cte);
 /* text/markdown or text/x-markdown */
 int   mime_is_markdown(const char *type);
 

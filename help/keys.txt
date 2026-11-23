@@ -76,7 +76,8 @@ Esc                  back to message list; in the list: leave the
 
 Selections available for Message window, 
 as shown on bottom of window H W X S P T K:
-                     H  Toggle between all headers and short header info
+                     H  the raw message (all headers, body as sent) over the
+                        whole screen; E opens it in the editor, Esc/H closes
                      W  wrap/unwrap long lines.
                      X  switch between hex dump and regular view.
                      S  save the message as shown in ~/Downloads

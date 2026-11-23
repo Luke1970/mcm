@@ -67,6 +67,7 @@ void config_load(void)
 	FILE *f = fopen(p, "r");
 	if (!f) return;
 	account_t *a = NULL;
+	int other = 0;                                /* in a section that is not [account] */
 	while (fgets(line, sizeof line, f)) {
 		char *s = str_trim(line);
 		if (*s == '#' || !*s) continue;              /* '#' inside a value is kept */
@@ -75,19 +76,26 @@ void config_load(void)
 			if (!e) continue;
 			*e = '\0';
 			s = str_trim(s + 1);
-			if (strncasecmp(s, "account", 7)) { a = NULL; continue; }
+			other = strncasecmp(s, "account", 7) != 0;
+			a = NULL;
+			if (other) continue;
 			s = str_trim(s + 7);
 			a = account_find(s);
 			if (!a) a = account_new(s);
 			continue;
 		}
 		char *eq = strchr(s, '=');
-		if (!eq) continue;
+		if (!eq || other) continue;
 		*eq = '\0';
 		char *k = str_trim(s), *v = str_trim(eq + 1);
 		if (!strcasecmp(k, "theme")) { snprintf(A.theme, sizeof A.theme, "%s", v); continue; }
 		if (!strcasecmp(k, "last_account")) { snprintf(last_account, sizeof last_account, "%s", v); continue; }
 		if (!strcasecmp(k, "message_wrap")) { A.nowrap = !atoi(v); continue; }
+		if (!strcasecmp(k, "check_mail")) {
+			int c = atoi(v);
+			if (c == 0 || (c >= 10 && c <= 86400)) check_mail = c;
+			continue;
+		}
 		if (!strcasecmp(k, "wrap_width")) {
 			int w = atoi(v);
 			if (w >= 20 && w <= 998) wrap_width = w;
@@ -165,6 +173,8 @@ void config_save(void)
 	fprintf(f, "wrap_width = %d       # new mail is wrapped at this column (format=flowed)\n",
 	        wrap_width);
 	fprintf(f, "message_wrap = %d     # 1: long lines in the message are wrapped (W)\n", !A.nowrap);
+	fprintf(f, "check_mail = %d       # seconds between checks for new mail (10-86400; 0: only F5)\n",
+	        check_mail);
 	fprintf(f, "folders_width = %d    # %% of the screen for Folders (0: 25 %%, at most 35 columns)\n", col_pct[0]);
 	fprintf(f, "list_width = %d       # %% for the list (3 columns: of what the folders leave)\n",
 	        col_pct[1]);

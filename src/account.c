@@ -355,6 +355,27 @@ static void wrap_settings(void)
 	}
 }
 
+/* Config: how often the open folder is checked for new mail. */
+static void check_settings(void)
+{
+	char v[8];
+	snprintf(v, sizeof v, "%d", check_mail);
+	const char *err = "Seconds, 10-86400 (default 60); 0: only with F5";
+	for (;;) {
+		ui_field f[] = {{"Every", v, sizeof v, 0, 0}};
+		if (ui_input_dialog("Check for new mail", f, 1, err, draw_bg) < 0) return;
+		int c = atoi(v);
+		if (*v && strspn(v, "0123456789") == strlen(v) && (c == 0 || (c >= 10 && c <= 86400))) {
+			check_mail = c;
+			config_save();
+			if (c) set_status("New mail is checked every %d seconds", c);
+			else set_status("%s", "New mail is checked only with F5");
+			return;
+		}
+		err = "0, or a number from 10 to 86400, please";
+	}
+}
+
 /* Colors of theme A.theme: ~/.config/mcm/NAME.theme (copied there from the
  * installed theme the first time). msg: an error, a note about a new file,
  * or "". */
@@ -418,21 +439,26 @@ void config_menu(void)
 	snprintf(ww, sizeof ww, "Wrap width for new mail: %d ...", wrap_width);
 	char th[160];
 	snprintf(th, sizeof th, "Theme (colors): %.60s ...", A.theme);
+	char cm[80];
+	if (check_mail) snprintf(cm, sizeof cm, "Check for new mail: every %d seconds ...", check_mail);
+	else snprintf(cm, sizeof cm, "Check for new mail: only with F5 ...");
 	const char *items[] = {
 		"Outgoing mail (SMTP) ...",
 		acc,
 		"Switch or add account ...",
 		ww,
+		cm,
 		th,
 		"Delete all stored passwords ...",
 	};
-	switch (ui_list_dialog("Config", items, 6, 0, "Enter choose   Esc cancel", draw_bg)) {
+	switch (ui_list_dialog("Config", items, 7, 0, "Enter choose   Esc cancel", draw_bg)) {
 	case 0: smtp_settings(NULL, draw_bg); break;
 	case 1: account_settings(); break;
 	case 2: account_menu(); break;
 	case 3: wrap_settings(); break;
-	case 4: theme_settings(); break;
-	case 5: delete_all_passwords(); break;
+	case 4: check_settings(); break;
+	case 5: theme_settings(); break;
+	case 6: delete_all_passwords(); break;
 	}
 }
 

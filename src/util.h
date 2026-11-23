@@ -53,6 +53,10 @@ uint32_t cp1252_char(uint32_t c);
  * Windows-1252, C1 controls (U+0080-U+009F) too; other control characters
  * than newline and tab are left out. Returns a new string. */
 char *utf8_clean(const char *s, size_t n, size_t *outlen);
+/* The same, but all control characters (\r, \f, ...) are kept, and text
+ * that is valid UTF-8 already comes back unchanged. For text that says it
+ * is UTF-8 (or names no charset, or one iconv does not know). */
+char *utf8_repair(const char *s, size_t n, size_t *outlen);
 
 char *str_trim(char *s);
 void  str_lower(char *s);

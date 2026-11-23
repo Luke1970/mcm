@@ -153,6 +153,8 @@ section per account:
 
   theme = default
   wrap_width = 72            (20-998)
+  check_mail = 60            seconds between new-mail checks when idle
+                             (10-86400; 0 = only F5; C -> Check for new mail)
   message_wrap = 1           W: long message lines wrapped (1) or not (0)
   folders_width = 0          Folders: % of the screen, 0 = 25 % but at most
                              35 columns (0.994; 25, the old default, = 0)
@@ -243,7 +245,7 @@ IMAP (src/imap.c):
   and Drafts.
 - Folder names in modified UTF-7, shown decoded, nested by hierarchy.
 - New mail and deletions from untagged responses (EXISTS, EXPUNGE, FETCH);
-  NOOP every 60 s and on F5. The selection stays on the same message.
+  NOOP every check_mail seconds (default 60) and on F5. The selection stays on the same message.
 - On a dropped connection: reconnect once and repeat the command (password
   kept in memory for this).
 
@@ -295,7 +297,7 @@ Local (src/local.c):
 10. Screen layout
 -----------------
 
-  mcm 0.995 Quit Mail Reply Forward Account Config F1=Menu  date time
+  mcm 0.996 Quit Mail Reply Forward Account Config F1=Menu  date time
   +- INBOX  3 msgs, 1 new --------------++- Message ---------------------+
   |A Weekly deals    Newsletter 261112.23:01|From    Newsletter <news@..>  ^
   |N Groesse aus.. Juergen M.. 261111.09:15|Subject Weekly deals          #
@@ -832,7 +834,23 @@ file picker and the editor, without questions:
   lose their markers; # headings underlined (levels 1-2); links and images
   as with HTML; fenced (``` ~~~) and indented code kept as written,
   indented by 4; lists and quotes unchanged; backslash escapes.
-- H shows all headers; W wraps long lines (max 76 columns) or not; X shows
+- Markdown in text/plain (0.996, textconv.c md_detect): converted the same
+  way when it uses two or more kinds of markup (# heading, two headings
+  count as two, **bold**/__bold__, *italic*/_italic_, `code`, [text](url),
+  ``` fence), quoted lines not counted. Not with T. Both paths: mime.c
+  render_part and msgview.c render_leaf.
+- Markdown styles (0.996): while mv_render runs (textconv_styles), md_to_text
+  puts marker characters U+F8E0 + 2*style (+1 at the end) around bold,
+  italic, ~~strike~~, code and heading text; ts_strip removes them from the
+  rendered text and keeps spans (mv->sty) that draw_text_line draws: bold,
+  A_ITALIC (else underline), U+0336 after each character for strike, code
+  in CP_HEADER, headings bold in CP_PICK (level 3 "--> ", 4-6
+  "-> "), bold in the text color (the user's wish; Konsole needs
+  "Draw intense colors in bold font"). mv_body (replies), S, P and
+  search see plain text. HTML has no styles yet (table widths).
+- H (0.996, msgwin.c raw_view): the raw message (store_fetch_partial "",
+  CRs removed, cut at the screen width) in a window over the whole screen;
+  E opens it in the editor (edit_text, read only), Esc/H/Q close. W wraps long lines (max 76 columns) or not; X shows
   a hex dump of the raw message.
 - The converters must survive any input (fuzzed) and be fast (800 KB in
   well under a second).
@@ -903,6 +921,11 @@ Editor (vim-like):
   control characters (CR, VT, ...) except tab are left out; otherwise the
   send check (valid UTF-8, no controls) would refuse it. HTML &#128;-&#159;
   are Windows-1252 too, as in HTML5.
+  Showing: conv_to_utf8 uses utf8_repair for "utf-8", "us-ascii", no
+  charset and charsets iconv does not know: valid UTF-8 as is, other bytes
+  as Windows-1252, control characters kept. mime_decode_words converts
+  adjacent encoded words of one charset together (a character split over
+  two words) and repairs 8-bit header text outside encoded words.
 - Two windows: header on top, message below. It opens in the header window;
   Tab goes to the message text; Esc (header or message) to command
   mode. Down on the last header line goes to the message, Up on the first
@@ -1133,6 +1156,9 @@ the login times calculated from them.
   win/            Windows manifest and resource; build output
   help/*.txt      help texts; tools/txt2c.awk; themes/*.theme
   dos/            MS-DOS TLS benchmark and BearSSL patch
+  tests/          make test: util, mime, textconv, config, vault, and a
+                  fuzz test (damaged messages); SANITIZE=1 for ASan/UBSan
+  .github/workflows/test.yml   CI: build, make test, make test SANITIZE=1
 
 
 20. Order of building (as it was done)
@@ -1151,6 +1177,28 @@ the login times calculated from them.
     the BSDs, MS-DOS study
 
 11. Open drafts again, save received attachments, reply-all, new-mail
-    notice; PGP (0.995)
+    notice; PGP (0.995); Markdown in plain text, new-mail notice in
+    black or white; Markdown bold, italic, strike, code (0.996)
+
+12. make test: unit tests and a fuzz test of the parsers (0.996). They
+    found two bugs: quoted-printable attachments lost their last byte when
+    they did not end in a line break, and settings in an unknown
+    [section] of mcm.conf made a nameless extra account.
+    Hardening: stack protector, clash and CF protection, FORTIFY=3, PIE,
+    full RELRO (HARDEN=0: off); Windows ASLR/DEP; make SANITIZE=1 for mcm
+    itself; links get " encoded as %22 (one argument on Windows).
+    One text pipeline: mime_text_part (mime.c) is used by both mime_render
+    (raw messages: local folders, PGP, reply/forward) and msgview.c (IMAP
+    structure): transfer encoding, charset, HTML/Markdown to text, plain:
+    a hook (inline PGP, msgview.c), format=flowed, md_detect, invisible
+    characters; T: as sent. Also shared: mime_alt_choose (which part of a
+    multipart/alternative), mime_att_line ("[Attachment: ...]"),
+    MIME_EMPTY_PART. Each path still walks its own tree.
+    make static: tools/build-static.sh in an Alpine container: musl,
+    OpenSSL, ncurses 6.5 (own build: terminfo dirs of all distributions,
+    fallbacks xterm/screen/tmux/linux/...), static PIE, make test; dist/
+    tarball with themes/, README, LICENSE, INSTALL.txt. For it: themes
+    next to the program (/proc/self/exe), CA bundles of the distributions
+    (add_system_roots, net.c), MCM_STATIC: system openssl.cnf not read.
 
 Next: quick keys in the list, sorting by name and date.

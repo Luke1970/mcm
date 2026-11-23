@@ -45,9 +45,10 @@ extern int ui_key_senter;
 void ui_mouse_drag(int on);
 
 enum { CP_NORMAL = 1, CP_HIGHLIGHT, CP_MENU, CP_HOTKEY, CP_HOTKEY_HL,
-       CP_TITLE, CP_HEADER, CP_PICK };   /* CP_TITLE: title of the active window;
+       CP_TITLE, CP_HEADER, CP_PICK, CP_NOTICE };   /* CP_TITLE: title of the active window;
                                    CP_HEADER: headers in the message window;
-                                   CP_PICK: selected messages in the list */
+                                   CP_PICK: selected messages in the list;
+                                   CP_NOTICE: the new-mail notice */
 
 typedef void (*ui_bg_fn)(void);   /* redraws the screen behind a dialog */
 

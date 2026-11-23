@@ -1,0 +1,31 @@
+# Build mcm and run "make test" on every push and pull request, and once a
+# week (the fuzz test then runs longer). The second run uses
+# AddressSanitizer and UBSan, which catch reads and writes outside a buffer
+# and undefined behaviour that a normal run does not notice.
+name: test
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Packages
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libncurses-dev libssl-dev pkg-config
+      - name: Build (hardened)
+        run: make -j"$(nproc)"
+      - name: Tests
+        run: make test
+      - name: Tests with AddressSanitizer and UBSan
+        run: |
+          make clean
+          FUZZ=${{ github.event_name == 'schedule' && '300000' || '30000' }} make test SANITIZE=1

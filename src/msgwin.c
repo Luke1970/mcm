@@ -3,6 +3,13 @@
  */
 #include "mcm.h"
 
+/* italic where curses has it, else underlined */
+#ifdef A_ITALIC
+#define MCM_ITALIC A_ITALIC
+#else
+#define MCM_ITALIC A_UNDERLINE
+#endif
+
 static void push_line(size_t off, size_t len);
 static void index_lines(const char *t, size_t n, int width);
 static void build_text(int width);
@@ -193,6 +200,33 @@ static void draw_text_line(int y, int x, int w, const line_t *l)
 	if (col > A.hoff) *--p = ' ';
 	short base = l->off < A.mv.hdr_end ? CP_HEADER : CP_NORMAL;
 	ui_putw(y, x, p, w, 0, base);
+	/* Markdown: bold, italic, struck through (a combining long stroke
+	 * over each character), code on the header background, headings bold
+	 * in the hotkey color */
+	if (!A.hex && A.mv.nsty && l->off >= A.mv.hdr_end) {
+		size_t lo = l->off, hi = l->off + l->len;
+		for (int i = 0; i < A.mv.nsty && A.mv.sty[i].off < hi; i++) {
+			const ts_span *sp = &A.mv.sty[i];
+			size_t so = sp->off, eo = sp->off + sp->len;
+			if (eo <= lo) continue;
+			int u0 = so <= lo ? 0 : ca[so - lo], u1 = eo >= hi ? cb[l->len] : cb[eo - lo];
+			attr_t at = 0;
+			short pair = base;
+			if (sp->style & (1u << TS_BOLD | 1u << TS_HEAD)) at |= A_BOLD;
+			if (sp->style & 1u << TS_ITALIC) at |= MCM_ITALIC;
+			if (sp->style & 1u << TS_HEAD) pair = CP_PICK;
+			if (sp->style & 1u << TS_CODE) pair = CP_HEADER;
+			int strike = (sp->style & 1u << TS_STRIKE) != 0;
+			int c = 0;
+			for (wchar_t *q = e; *q; c += ui_wcwidth(*q), q++) {
+				int cw = ui_wcwidth(*q);
+				if (c < u0 || c >= u1 || c < A.hoff || cw <= 0) continue;
+				if (c - A.hoff + cw > w) break;
+				wchar_t one[3] = {*q, strike && *q != ' ' ? 0x336 : 0, 0};
+				ui_putw(y, x + c - A.hoff, one, cw, at, pair);
+			}
+		}
+	}
 	/* the links that can be chosen (Up/Down, Enter) underlined, as under a
 	 * mouse pointer */
 	if (!A.hex && l->off >= A.mv.hdr_end) {
@@ -618,14 +652,9 @@ static int line_at_off(size_t off)
 }
 
 /* :e - the message, as shown, in $VISUAL/$EDITOR (vi -R: read only). */
-static void view_in_editor(void)
+/* Text t (n bytes) in $VISUAL/$EDITOR, read only, from a temporary file. */
+static void edit_text(const char *t, size_t n)
 {
-	if (A.pending_load) load_selected();
-	if (!A.mv.open) {
-		set_status("%s", "No message is open");
-		return;
-	}
-	if (load_whole_message() != 0) return;
 	char path[1100];
 	int fd = -1;
 #ifdef _WIN32
@@ -645,9 +674,9 @@ static void view_in_editor(void)
 		set_status("Error: cannot create a temporary file: %s", strerror(errno));
 		return;
 	}
-	ssize_t w = write(fd, A.mv.text, A.mv.textlen);
+	ssize_t w = write(fd, t, n);
 	close(fd);
-	if (w != (ssize_t)A.mv.textlen) {
+	if (w != (ssize_t)n) {
 		unlink(path);
 		set_status("%s", "Error: cannot write the temporary file");
 		return;
@@ -657,6 +686,157 @@ static void view_in_editor(void)
 	clearok(curscr, TRUE);
 	if (rc != 0) set_status("%s", "Error: the editor ($VISUAL/$EDITOR) did not run or failed");
 }
+
+static void view_in_editor(void)
+{
+	if (A.pending_load) load_selected();
+	if (!A.mv.open) {
+		set_status("%s", "No message is open");
+		return;
+	}
+	if (load_whole_message() != 0) return;
+	edit_text(A.mv.text, A.mv.textlen);
+}
+
+/* ------------------------------------------------------------------ */
+/* H: the raw message                                                  */
+
+/* Display lines of raw text t: cut at width columns (not at words: the
+ * text is shown as it is). *out: offsets and lengths, *n their number. */
+static void raw_lines(const char *t, size_t len, int width, line_t **out, int *n)
+{
+	int cap = 0;
+	*out = NULL;
+	*n = 0;
+	if (width < 1) width = 1;
+	for (size_t i = 0; i <= len;) {
+		size_t s = i;
+		int col = 0;
+		while (i < len && t[i] != '\n') {
+			size_t cl;
+			wchar_t c = utf8_next(t + i, len - i, &cl);
+			if (!cl) cl = 1;
+			int cw = c == '\t' ? 8 - col % 8 : ui_wcwidth(c);
+			if (col + cw > width && i > s) break;
+			col += cw;
+			i += cl;
+		}
+		if (*n == cap) *out = xrealloc(*out, sizeof **out * (size_t)(cap = cap ? cap * 2 : 1024));
+		(*out)[(*n)++] = (line_t){(uint32_t)s, (uint32_t)(i - s)};
+		if (i >= len) break;
+		if (t[i] == '\n') i++;
+	}
+}
+
+/* Draw raw line l of t at y, w columns: tabs as spaces, control
+ * characters as spaces (ui_putw). */
+static void raw_draw_line(int y, int x, int w, const char *t, const line_t *l)
+{
+	wchar_t *e = xmalloc((l->len * 8 + 1) * sizeof *e);
+	size_t k = 0;
+	int col = 0;
+	for (size_t i = 0; i < l->len;) {
+		size_t cl;
+		wchar_t c = utf8_next(t + l->off + i, l->len - i, &cl);
+		if (!cl) cl = 1;
+		i += cl;
+		if (c == '\t') {
+			do { e[k++] = ' '; col++; } while (col % 8);
+		} else {
+			e[k++] = c;
+			col += ui_wcwidth(c);
+		}
+	}
+	e[k] = 0;
+	ui_putw(y, x, e, w, 0, CP_NORMAL);
+	free(e);
+}
+
+/* H: the whole message as it is on the server (all headers, the body
+ * still encoded) in a window over the whole screen. E opens it in the
+ * editor, Esc, H or Q closes it. */
+static void raw_view(void)
+{
+	if (A.pending_load) load_selected();
+	if (!A.mv.open) {
+		set_status("%s", "No message is open");
+		return;
+	}
+	now_status("Loading the message...");
+	buf_t raw = {0};
+	imap_partial_t req = {.section = "", .off = 0, .len = (size_t)-1 / 2, .out = &raw};
+	if (store_fetch_partial(A.im, A.mv.uid, &req, 1) != 0) {
+		set_status("Error: %s", store_error(A.im));
+		buf_free(&raw);
+		return;
+	}
+	set_status("%s", "");
+	/* without the CRs of the CRLF line ends */
+	size_t n = 0;
+	for (size_t i = 0; i < raw.len; i++)
+		if (!(raw.d[i] == '\r' && i + 1 < raw.len && raw.d[i + 1] == '\n')) raw.d[n++] = raw.d[i];
+	raw.len = n;
+	const char *t = raw.d ? raw.d : "";
+
+	line_t *lines = NULL;
+	int nl = 0, width = -1, top = 0;
+	timeout(1000);                           /* keep the clock ticking */
+	for (;;) {
+		int h = LINES - 2, w = COLS, inner = w - 2, rows = h - 2;
+		if (rows < 1) rows = 1;
+		if (inner != width) {
+			free(lines);
+			raw_lines(t, raw.len, inner, &lines, &nl);
+			width = inner;
+		}
+		if (top > nl - rows) top = nl - rows;
+		if (top < 0) top = 0;
+
+		bkgdset(' ' | COLOR_PAIR(CP_NORMAL));
+		erase();
+		ui_menubar(NULL, 0, 0);
+		ui_puts(0, 1, "mcm " MCM_VERSION, 12, A_BOLD, CP_MENU);
+		char title[64];
+		if (nl > rows) snprintf(title, sizeof title, " Raw message  %d%% ", (top + rows) * 100 / nl);
+		else snprintf(title, sizeof title, " Raw message ");
+		if (h >= 3) {
+			ui_box(1, 0, h, w, CP_NORMAL, title, A_BOLD, CP_TITLE);
+			for (int r = 0; r < rows && top + r < nl; r++)
+				raw_draw_line(2 + r, 1, inner, t, &lines[top + r]);
+		}
+		ui_fill(LINES - 1, 0, 1, COLS, CP_MENU);
+		ui_puts(LINES - 1, 1, *A.status ? A.status
+		        : "E Open in the editor  Esc/H Close  ↑↓ PgUp PgDn Home End",
+		        COLS - 2, 0, CP_MENU);
+		refresh();
+
+		int ch = ui_getch();
+		if (ch == ERR || ch == KEY_RESIZE) continue;
+		set_status("%s", "");
+		int page = rows > 1 ? rows - 1 : 1;
+		if (ch == KEY_MOUSE) {
+			MEVENT ev;
+			if (getmouse(&ev) != OK) continue;
+			if (ev.bstate & BUTTON4_PRESSED) top -= 3;
+			else if (ev.bstate & BUTTON5_PRESSED) top += 3;
+			continue;
+		}
+		if (ch == 27 || ch == 'h' || ch == 'H' || ch == 'q' || ch == 'Q') break;
+		else if (ch == 'e' || ch == 'E') edit_text(t, raw.len);
+		else if (ch == KEY_UP || ch == 'k') top--;
+		else if (ch == KEY_DOWN || ch == 'j' || ch == '\n' || ch == KEY_ENTER) top++;
+		else if (ch == KEY_PPAGE || ch == 'b' || ch == 'B' || ch == KEY_BACKSPACE || ch == 127) top -= page;
+		else if (ch == KEY_NPAGE || ch == ' ') top += page;
+		else if (ch == KEY_HOME || ch == 'g') top = 0;
+		else if (ch == KEY_END || ch == 'G') top = nl;
+		else if (ch == 12) clearok(curscr, TRUE);
+	}
+	free(lines);
+	buf_free(&raw);
+	clearok(curscr, TRUE);
+}
+
+void handle_key_raw(void) { raw_view(); }
 
 /* :w FILE - the message, as shown, to FILE (:w! replaces it). */
 static void write_message_to(const char *name, int force)
@@ -919,7 +1099,9 @@ static void open_link(const char *url)
 	buf_t b = {0};
 	for (const unsigned char *s = (const unsigned char *)url; *s; s++) {
 		if (*s < ' ' || *s == 127) good = 0;
+		/* encoded, so that a link is always one argument (Windows) */
 		if (*s == ' ') buf_adds(&b, "%20");
+		else if (*s == '"') buf_adds(&b, "%22");
 		else buf_addc(&b, (char)*s);
 	}
 	if (!good) set_status("Not opened: mcm opens only http, https, ftp and mailto links");

@@ -7,8 +7,16 @@
 #   make install          install in $(PREFIX) (default /usr/local)
 #   make uninstall        remove it again
 #   make clean            remove what make built
+#   make test             build and run the tests in tests/ (SANITIZE=1: with
+#                         AddressSanitizer and UBSan; FUZZ=n: more fuzz rounds)
+#   make SANITIZE=1       mcm itself with AddressSanitizer and UBSan (for
+#                         testing; "make clean" first, so all is rebuilt)
+#   make HARDEN=0         without the hardening flags (see below)
 #   make win              Windows 10/11: win/mcm/mcm.exe (one file) and win/mcm.zip
 #                         (cross-compiled with MinGW-w64, see README.md)
+#   make static           Linux: one static program for every distribution,
+#                         dist/mcm-VERSION-linux-ARCH.tar.gz (built in an
+#                         Alpine container with podman or docker)
 #   make dos-bench        MS-DOS: the TLS benchmark (Open Watcom, BearSSL)
 #
 # Libraries are found with pkg-config (ncursesw, openssl); without it the
@@ -54,8 +62,27 @@ OS_CFLAGS     := -I/usr/local/include
 OS_LDFLAGS    := -L/usr/local/lib
 endif
 
-MCM_CFLAGS := -std=gnu11 -Wall -Wextra -D_GNU_SOURCE -DDATADIR=\"$(DATADIR)\" \
+# Hardening: mcm reads mail from anyone, so a bug in a parser should not
+# become a way in. Stack protector and clash protection, control-flow
+# protection (x86), checked string and memory functions (FORTIFY), a
+# position-independent executable (ASLR) and read-only relocations (full
+# RELRO). Only the flags the compiler accepts are used; HARDEN=0: none.
+cc_flag = $(shell echo 'int main(void){return 0;}' | $(CC) $(1) -x c - -o /dev/null >/dev/null 2>&1 && echo "$(1)")
+RELRO := -Wl,-z,relro,-z,now
+ifneq ($(HARDEN),0)
+HARDEN_CFLAGS  := $(call cc_flag,-fstack-protector-strong) $(call cc_flag,-fstack-clash-protection) \
+                  $(call cc_flag,-fcf-protection) $(call cc_flag,-fPIE) -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=3
+HARDEN_LDFLAGS := $(call cc_flag,-pie) $(call cc_flag,$(RELRO))
+endif
+ifeq ($(SANITIZE),1)
+SAN_FLAGS      := -fsanitize=address,undefined -fno-omit-frame-pointer
+HARDEN_CFLAGS  := $(filter-out -D_FORTIFY_SOURCE=3,$(HARDEN_CFLAGS))
+endif
+
+MCM_CFLAGS := -std=gnu11 -Wall -Wextra -Wformat -Wformat-security -D_GNU_SOURCE \
+               -DDATADIR=\"$(DATADIR)\" $(HARDEN_CFLAGS) $(SAN_FLAGS) \
                $(CURSES_CFLAGS) $(SSL_CFLAGS) $(OS_CFLAGS)
+MCM_LDFLAGS := $(HARDEN_LDFLAGS) $(SAN_FLAGS)
 MCM_LIBS   := $(CURSES_LIBS) $(SSL_LIBS) $(ICONV_LIBS)
 
 SRC := $(wildcard src/*.c)
@@ -64,7 +91,7 @@ OBJ := $(SRC:.c=.o)
 all: mcm
 
 mcm: $(OBJ)
-	$(CC) $(LDFLAGS) $(OS_LDFLAGS) -o $@ $(OBJ) $(MCM_LIBS) $(LDLIBS)
+	$(CC) $(MCM_LDFLAGS) $(LDFLAGS) $(OS_LDFLAGS) -o $@ $(OBJ) $(MCM_LIBS) $(LDLIBS)
 
 src/%.o: src/%.c $(wildcard src/*.h)
 	$(CC) $(CPPFLAGS) $(MCM_CFLAGS) $(CFLAGS) -c -o $@ $<
@@ -80,6 +107,22 @@ src/helptext.h: $(HELP) tools/txt2c.awk
 
 src/main.o src/keys.o src/editor.o: src/helptext.h
 
+# Tests: tests/run, built from the tested sources themselves (so SANITIZE=1
+# applies to them too). Only the parts without screen or network are tested:
+# util, mime, textconv, config, vault.
+TEST_SRC := $(wildcard tests/*.c) src/util.c src/mime.c src/textconv.c src/config.c src/vault.c
+ifeq ($(SANITIZE),1)
+TEST_FLAGS := -O1 -g -fno-sanitize-recover=undefined
+else
+TEST_FLAGS := -O1 -g
+endif
+
+test: tests/run
+	./tests/run
+
+tests/run: $(TEST_SRC) tests/check.h $(wildcard src/*.h) Makefile
+	$(CC) $(CPPFLAGS) $(MCM_CFLAGS) $(TEST_FLAGS) $(MCM_LDFLAGS) $(LDFLAGS) $(OS_LDFLAGS) -o $@ $(TEST_SRC) $(MCM_LIBS) $(LDLIBS)
+
 install: mcm
 	install -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)$(DATADIR)/themes
 	install -m 755 mcm $(DESTDIR)$(PREFIX)/bin/mcm
@@ -90,9 +133,23 @@ uninstall:
 	rm -rf $(DESTDIR)$(DATADIR)
 
 clean:
-	rm -f mcm $(OBJ) src/helptext.h
+	rm -f mcm $(OBJ) src/helptext.h tests/run
+	rm -rf dist
 	rm -rf win/obj win/mcm win/mcm.zip
 	rm -rf dos/obj16 dos/obj32 dos/*.EXE dos/*.o dos/*.obj dos/*.err
+
+# ---------------------------------------------------------------------------
+# Linux, static: musl, OpenSSL and ncurses linked in (tools/build-static.sh).
+CONTAINER ?= $(shell command -v podman >/dev/null 2>&1 && echo podman || echo docker)
+ALPINE    ?= docker.io/library/alpine:3.22
+# podman without systemd (or in a container): cgroupfs, no cgroups
+CONTAINER_OPTS ?= $(if $(filter podman,$(CONTAINER)),--cgroup-manager=cgroupfs,)
+CONTAINER_RUN  ?= $(if $(filter podman,$(CONTAINER)),--cgroups=disabled,)
+
+static:
+	mkdir -p dist
+	$(CONTAINER) $(CONTAINER_OPTS) run $(CONTAINER_RUN) --rm --network=host -v "$(CURDIR)":/src:ro,Z \
+	  -v "$(CURDIR)/dist":/out:Z $(ALPINE) sh /src/tools/build-static.sh
 
 # ---------------------------------------------------------------------------
 # Windows 10 / 11, cross-compiled with MinGW-w64. The result is one file,
@@ -139,7 +196,7 @@ win/obj/mcm.res: win/mcm.rc win/mcm.manifest
 
 win/mcm/mcm.exe: $(WIN_OBJ) win/obj/libpdcurses.a $(wildcard themes/*.theme)
 	rm -rf win/mcm/themes && mkdir -p win/mcm/themes
-	$(WIN_CC) -static -s -o $@ $(WIN_OBJ) win/obj/libpdcurses.a -L$(WIN_LIBDIR) -lssl -lcrypto \
+	$(WIN_CC) -static -s -Wl,--dynamicbase,--nxcompat,--high-entropy-va -o $@ $(WIN_OBJ) win/obj/libpdcurses.a -L$(WIN_LIBDIR) -lssl -lcrypto \
 	  -lz -liconv -lws2_32 -lcrypt32 -lbcrypt -ladvapi32 -luser32 -lgdi32 -lpathcch -lshell32
 	cp themes/*.theme win/mcm/themes/
 	cd win && rm -f mcm.zip && { command -v zip >/dev/null && zip -qr mcm.zip mcm || true; }
@@ -191,4 +248,4 @@ dos/BENCH32.EXE: dos/bench.c dos/vectors.h dos/obj32/bearssl.lib
 	cd dos && $(WENV) wcl386 -q -bt=dos -l=dos32a -3r -fpc -ox -za99 $(BR_DEFS) \
 	  -i=$(abspath $(BEARSSL))/inc -fe=BENCH32.EXE bench.c obj32/bearssl.lib
 
-.PHONY: all install uninstall clean win win-check dos-bench dos-check
+.PHONY: all test static install uninstall clean win win-check dos-bench dos-check

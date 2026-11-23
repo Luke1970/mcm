@@ -5,6 +5,10 @@
  */
 #include "mcm.h"
 #include "helptext.h"   /* the help texts, from the files in help/ */
+#ifdef MCM_STATIC
+#include <openssl/crypto.h>
+#include <openssl/ssl.h>
+#endif
 
 /* the shared state (mcm.h) */
 account_t  accts[MAX_ACCOUNTS];
@@ -14,6 +18,7 @@ char       last_account[64];
 char      *master_check;
 char      *master;
 int wrap_width = 72;
+int check_mail = 60;
 char cfg_pdf_viewer[256], cfg_html_viewer[256];
 char cfg_pdf_viewer_console[256], cfg_html_viewer_console[256];
 int col_pct[3] = {0, 45, 0};   /* 0: folders 25 % up to 35 columns, accounts 25 columns */
@@ -564,6 +569,16 @@ void switch_account(const char *name)
 int main(int argc, char **argv)
 {
 	setlocale(LC_ALL, "");
+#ifdef MCM_STATIC
+	/* The static build (make static) has its own OpenSSL: the system's
+	 * openssl.cnf is for the system's OpenSSL and may load modules this
+	 * one does not have (openSUSE: TLS would not start). Its own defaults
+	 * are used, unless OPENSSL_CONF names a configuration. */
+	if (!getenv("OPENSSL_CONF")) {
+		OPENSSL_init_crypto(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
+		OPENSSL_init_ssl(OPENSSL_INIT_NO_LOAD_CONFIG, NULL);
+	}
+#endif
 #ifdef SIGPIPE
 	signal(SIGPIPE, SIG_IGN);
 #endif
@@ -717,7 +732,7 @@ int main(int argc, char **argv)
 			ch = ui_getch();
 			if (ch == ERR) {              /* idle */
 				if (A.pending_load) load_selected();
-				else if (time(NULL) - A.last_poll >= POLL_SECONDS) refresh_folder(1);
+				else if (check_mail > 0 && time(NULL) - A.last_poll >= check_mail) refresh_folder(1);
 				continue;
 			}
 		}

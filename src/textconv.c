@@ -54,11 +54,70 @@ static void links_out(links_t *l, buf_t *out)
 }
 
 /* Screen columns of n bytes of UTF-8. */
+/* A style marker at s (3 bytes, U+F8E0-U+F8E9): style * 2 + end + 1, else 0. */
+static int ts_marker(const char *s, size_t n)
+{
+	const unsigned char *u = (const unsigned char *)s;
+	return n >= 3 && u[0] == 0xEF && u[1] == 0xA3 && u[2] >= 0xA0 && u[2] < 0xA0 + 2 * TS_N
+	       ? u[2] - 0xA0 + 1 : 0;
+}
+
+static int styles_on;
+
+void textconv_styles(int on) { styles_on = on; }
+
+/* Mark the start (end = 0) or end of style st in out, while styles are on. */
+static void ts_mark(buf_t *out, int st, int end)
+{
+	if (!styles_on) return;
+	char m[3] = {(char)0xEF, (char)0xA3, (char)(0xA0 + 2 * st + end)};
+	buf_add(out, m, 3);
+}
+
+size_t ts_strip(char *t, size_t len, ts_span **sp, int *nsp, size_t *keep)
+{
+	int depth[TS_N] = {0}, cap = 0;
+	unsigned cur = 0;
+	size_t w = 0, start = 0, kept = keep ? *keep : (size_t)-1;
+	*sp = NULL;
+	*nsp = 0;
+	for (size_t r = 0; r <= len;) {
+		int m = r < len ? ts_marker(t + r, len - r) : 0;
+		if (r == len || m) {
+			unsigned next = cur;
+			if (m) {
+				int st = (m - 1) / 2;
+				if ((m - 1) % 2) { if (depth[st]) depth[st]--; }
+				else depth[st]++;
+				next = 0;
+				for (int i = 0; i < TS_N; i++) if (depth[i]) next |= 1u << i;
+			}
+			if ((next != cur || r == len) && cur && w > start) {   /* a span ends */
+				if (*nsp && (*sp)[*nsp - 1].off + (*sp)[*nsp - 1].len == start &&
+				    (*sp)[*nsp - 1].style == cur) {
+					(*sp)[*nsp - 1].len += w - start;
+				} else {
+					if (*nsp == cap) *sp = xrealloc(*sp, sizeof **sp * (size_t)(cap = cap ? cap * 2 : 32));
+					(*sp)[(*nsp)++] = (ts_span){start, w - start, cur};
+				}
+			}
+			if (next != cur) { cur = next; start = w; }
+			if (r == len) break;
+			if (keep && kept != (size_t)-1 && kept > r) *keep -= 3;
+			r += 3;
+			continue;
+		}
+		t[w++] = t[r++];
+	}
+	return w;
+}
+
 static size_t text_width(const char *s, size_t n)
 {
 	size_t w = 0, i = 0;
 	while (i < n) {
 		size_t cl;
+		if (ts_marker(s + i, n - i)) { i += 3; continue; }
 		wchar_t c = utf8_next(s + i, n - i, &cl);
 		int cw = wcwidth(c);
 		w += cw > 0 ? (size_t)cw : 0;
@@ -686,7 +745,9 @@ static void md_inline(const char *s, size_t n, buf_t *out, links_t *links, int d
 			if (j + r <= n) {
 				size_t a = i + r, b = j;
 				if (b - a >= 2 && s[a] == ' ' && s[b - 1] == ' ') { a++; b--; }
+				ts_mark(out, TS_CODE, 0);
 				buf_add(out, s + a, b - a);
+				ts_mark(out, TS_CODE, 1);
 				i = j + r;
 				continue;
 			}
@@ -729,6 +790,19 @@ static void md_inline(const char *s, size_t n, buf_t *out, links_t *links, int d
 				continue;
 			}
 		}
+		if (c == '~' && i + 2 < n && s[i + 1] == '~' && s[i + 2] != '~' &&
+		    !isspace((unsigned char)s[i + 2]) && depth < 8) {   /* ~~struck through~~ */
+			size_t j = i + 3;
+			while (j + 1 < n && !(s[j] == '~' && s[j + 1] == '~' && !isspace((unsigned char)s[j - 1])))
+				j++;
+			if (j + 1 < n) {
+				ts_mark(out, TS_STRIKE, 0);
+				md_inline(s + i + 2, j - i - 2, out, links, depth + 1);
+				ts_mark(out, TS_STRIKE, 1);
+				i = j + 2;
+				continue;
+			}
+		}
 		if ((c == '*' || c == '_') && depth < 8) {   /* emphasis: drop the markers */
 			size_t r = 0;
 			while (i + r < n && s[i + r] == c && r < 3) r++;
@@ -744,7 +818,12 @@ static void md_inline(const char *s, size_t n, buf_t *out, links_t *links, int d
 						break;
 				}
 				if (j + r <= n && j > i + r) {
+					/* *italic*, **bold**, ***both*** */
+					if (r != 2) ts_mark(out, TS_ITALIC, 0);
+					if (r >= 2) ts_mark(out, TS_BOLD, 0);
 					md_inline(s + i + r, j - i - r, out, links, depth + 1);
+					if (r >= 2) ts_mark(out, TS_BOLD, 1);
+					if (r != 2) ts_mark(out, TS_ITALIC, 1);
 					i = j + r;
 					continue;
 				}
@@ -778,7 +857,9 @@ void md_to_text(const char *s, size_t len, buf_t *out)
 		}
 		if (fence || (n >= 4 && !memcmp(ln, "    ", 4)) || (n && ln[0] == '\t')) {
 			if (fence) buf_adds(out, "    ");
+			ts_mark(out, TS_CODE, 0);
 			buf_add(out, ln, n);                     /* code: as written */
+			ts_mark(out, TS_CODE, 1);
 			buf_addc(out, '\n');
 			continue;
 		}
@@ -790,7 +871,11 @@ void md_to_text(const char *s, size_t len, buf_t *out)
 				while (a < b && ln[a] == ' ') a++;
 				while (b > a && (ln[b - 1] == '#' || ln[b - 1] == ' ')) b--;
 				size_t hs = out->len;
+				ts_mark(out, TS_HEAD, 0);
+				if (lvl == 3) buf_adds(out, "--> ");      /* levels 1-2 are underlined */
+				else if (lvl >= 4) buf_adds(out, "-> ");
 				md_inline(ln + a, b - a, out, &links, 0);
+				ts_mark(out, TS_HEAD, 1);
 				size_t w = text_width(out->d + hs, out->len - hs);
 				buf_addc(out, '\n');
 				if (lvl <= 2 && w) {
@@ -806,6 +891,74 @@ void md_to_text(const char *s, size_t len, buf_t *out)
 	links_out(&links, out);
 	tidy(out, start);
 	ensure_nl(out);
+}
+
+/* Does plain text s use Markdown? Kinds of markup counted (each once):
+ * # headings, **bold** or __bold__, *italic* or _italic_, `code`,
+ * ~~struck~~, [text](url) links and ``` code blocks; two or more headings count as
+ * two kinds. Quoted lines ("> ") do not count. Markdown: two kinds or
+ * more, so that one *word* or #hashtag in ordinary mail does not. */
+enum { MD_HEAD = 1, MD_HEAD2 = 2, MD_BOLD = 4, MD_EM = 8, MD_CODE = 16, MD_LINK = 32, MD_FENCE = 64,
+       MD_STRIKE = 128 };
+
+/* A pair of markers m (length r) around non-space text in line ln. */
+static int md_pair(const char *ln, size_t n, char m, size_t r)
+{
+	for (size_t i = 0; i + r < n; i++) {
+		size_t k = 0;
+		while (k < r && i + k < n && ln[i + k] == m) k++;
+		if (k != r || (i + r < n && ln[i + r] == m) || (i && ln[i - 1] == m)) continue;
+		if (i + r >= n || isspace((unsigned char)ln[i + r])) continue;
+		if (m == '_' && i && isalnum((unsigned char)ln[i - 1])) continue;
+		for (size_t j = i + r + 1; j + r <= n; j++) {
+			size_t q = 0;
+			while (q < r && ln[j + q] == m) q++;
+			if (q == r && !(j + r < n && ln[j + r] == m) && !isspace((unsigned char)ln[j - 1]) &&
+			    !(m == '_' && j + r < n && isalnum((unsigned char)ln[j + r])))
+				return 1;
+		}
+	}
+	return 0;
+}
+
+int md_detect(const char *s, size_t len)
+{
+	int kinds = 0, heads = 0;
+	size_t i = 0;
+	while (i < len) {
+		const char *ln = s + i;
+		const char *eol = memchr(ln, '\n', len - i);
+		size_t n = eol ? (size_t)(eol - ln) : len - i;
+		i += n + (eol ? 1 : 0);
+		if (n && ln[n - 1] == '\r') n--;
+		size_t k = 0;
+		while (k < n && k < 3 && ln[k] == ' ') k++;
+		if (k < n && ln[k] == '>') continue;
+		if (n - k >= 3 && ln[k] == '`' && ln[k + 1] == '`' && ln[k + 2] == '`') { kinds |= MD_FENCE; continue; }
+		if (k < n && ln[k] == '#') {
+			size_t lvl = 0;
+			while (k + lvl < n && ln[k + lvl] == '#') lvl++;
+			if (lvl <= 6 && k + lvl + 1 < n && ln[k + lvl] == ' ' && !isspace((unsigned char)ln[k + lvl + 1])) {
+				kinds |= ++heads > 1 ? MD_HEAD | MD_HEAD2 : MD_HEAD;
+				continue;
+			}
+		}
+		if (md_pair(ln, n, '*', 2) || md_pair(ln, n, '_', 2)) kinds |= MD_BOLD;
+		if (md_pair(ln, n, '*', 1) || md_pair(ln, n, '_', 1)) kinds |= MD_EM;
+		if (md_pair(ln, n, '`', 1)) kinds |= MD_CODE;
+		if (md_pair(ln, n, '~', 2)) kinds |= MD_STRIKE;
+		for (size_t j = 0; j + 1 < n; j++) {
+			size_t tl, total;
+			char url[8];
+			if (ln[j] == '[' && md_link(ln + j, n - j, &tl, &total, url, sizeof url) && tl) {
+				kinds |= MD_LINK;
+				break;
+			}
+		}
+	}
+	int c = 0;
+	for (; kinds; kinds &= kinds - 1) c++;
+	return c >= 2;
 }
 
 /* ------------------------------------------------------------------ */

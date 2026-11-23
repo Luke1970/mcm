@@ -72,7 +72,19 @@ curl -LO https://github.com/Luke1970/mcm/archive/refs/heads/main.zip
 unzip main.zip && cd mcm-main
 ```
 
-A ready-made Windows version is at <https://sc00by.nl/lucien/mcm/mcm.zip>.
+Ready-made programs are on the
+[releases page](https://github.com/Luke1970/mcm/releases):
+
+- **Linux**: `mcm-VERSION-linux-x86_64.tar.gz`, one static program that runs
+  on every distribution (nothing to install, no libraries needed):
+
+  ```sh
+  tar xzf mcm-0.996-linux-x86_64.tar.gz
+  cd mcm-0.996-linux-x86_64 && ./mcm
+  ```
+
+  `INSTALL.txt` in it says how to install it in `/usr/local`.
+- **Windows**: `mcm.zip`, also at <https://sc00by.nl/lucien/mcm/mcm.zip>.
 
 ## Build
 
@@ -92,6 +104,26 @@ in `$(PREFIX)/share/mcm/themes` (`PREFIX` is `/usr/local` unless you give
 another one, e.g. `make install PREFIX=$HOME/.local`); `make uninstall`
 removes them. Library flags can be overridden, e.g.
 `make CURSES_LIBS="-lncursesw -ltinfo"`.
+
+### Linux, one static program
+
+`make static` builds `dist/mcm-VERSION-linux-ARCH.tar.gz`: mcm with musl
+libc, OpenSSL and ncurses linked in, so it runs on any Linux distribution.
+It is built in an Alpine Linux container, so only **podman** or **docker**
+is needed (`make static CONTAINER=docker` to choose); the build script is
+`tools/build-static.sh` and runs `make test` too.
+
+The program looks for what it needs where each distribution keeps it: the
+trusted certificates (Debian, Ubuntu, Arch, Alpine:
+`/etc/ssl/certs/ca-certificates.crt`; Fedora, RHEL:
+`/etc/pki/tls/certs/ca-bundle.crt`; openSUSE: `/etc/ssl/ca-bundle.pem`;
+or what `SSL_CERT_FILE` / `SSL_CERT_DIR` say) and the terminal descriptions
+(`/etc/terminfo`, `/lib/terminfo`, `/usr/share/terminfo`; xterm, screen,
+tmux, linux, foot and alacritty are built in). The themes are found in
+`themes/` next to the program as well. The system's `openssl.cnf` is not
+read (it is for the system's own OpenSSL), unless `OPENSSL_CONF` is set.
+Tested on Debian 12, Ubuntu 22.04 and 24.04, Fedora 43, Arch, openSUSE
+Tumbleweed, Rocky Linux 9 and Alpine 3.22.
 
 ### Linux
 
@@ -218,6 +250,50 @@ Copy `BENCH.EXE` or `BENCH32.EXE` to the DOS machine and run `BENCH FAST`
 (or `BENCH32 FAST`); without `FAST` it also times the slower alternative
 implementations. The results are shown and written to `RESULT.TXT`.
 
+### Tests
+
+`make test` builds `tests/run` and runs it. It tests the parts that need no
+screen or network: buffers and UTF-8 (`util.c`), MIME (headers, encoded
+words, base64 and quoted-printable, charsets, dates, addresses,
+format=flowed, multipart and attachments), HTML and Markdown as text with
+their styles (`textconv.c`), reading and writing `mcm.conf` (in a temporary
+directory, never your own) and stored passwords (`vault.c`). A fuzz test
+feeds thousands of damaged messages to all of these; it must not crash.
+
+```sh
+make test                    # all tests; exit status 1 when a check failed
+make test SANITIZE=1         # with AddressSanitizer and UBSan
+FUZZ=100000 tests/run fuzz   # only the fuzz test, more rounds (default 3000)
+tests/run mime textconv      # only these groups
+```
+
+`SANITIZE=1` needs the sanitizer libraries (Fedora: `dnf install libasan
+libubsan`; Debian/Ubuntu have them with gcc). The random changes of the
+fuzz test are the same every run, so a failure can be repeated.
+
+On GitHub the tests run after every push (`.github/workflows/test.yml`):
+once normally, once with the sanitizers, and once a week with a longer fuzz
+test.
+
+### Hardening
+
+mcm reads mail from anyone, so it is built to make a bug in a parser hard
+to use as a way in. `make` adds the flags the compiler knows: stack
+protector and stack clash protection, control-flow protection (x86),
+`_FORTIFY_SOURCE=3` (checked string and memory functions), a
+position-independent executable (ASLR) and full RELRO. `make HARDEN=0`
+leaves them out. The Windows build has ASLR (also high-entropy) and DEP.
+
+`make clean && make SANITIZE=1` builds mcm itself with AddressSanitizer
+and UBSan: slower, but a read or write outside a buffer stops it with a
+report instead of going unnoticed. For testing, not for every day.
+
+What else protects you: links in mail open only when they are http, https,
+ftp or mailto, and are always one argument to the browser; programs (editor,
+viewers) get the file or link as an argument, never as part of a shell
+command; stored passwords are encrypted (see Stored passwords); certificates
+are checked (see Usage: untrusted ones are shown and must be accepted).
+
 ### Help texts
 
 The help texts are plain text files in `help/`; edit them and run `make`:
@@ -331,7 +407,7 @@ such as `cur` are kept), and a saved message gets the next free number. An
 **mbox** file is only read and appended to (with `fcntl` locking and mboxrd
 `>From ` quoting): its `Status`/`X-Status` headers give the flags, and messages read in mcm count as seen until it exits.
 Changes by other programs (new mail delivered, messages removed) are picked up
-on F5 and every minute.
+on F5 and every minute (the `check_mail` setting).
 
 Sending from a local account uses its SMTP settings (**C** → SMTP); without
 a password there, mcm asks for one when sending.
@@ -345,6 +421,7 @@ section:
 theme = default
 wrap_width = 72
 message_wrap = 1
+check_mail = 60
 folders_width = 0
 list_width = 45
 accounts_width = 0
@@ -553,7 +630,7 @@ columns; 15 from an older mcm counts as 0).
 | Shift-Space, Ctrl-Space, Alt-Space, Backspace | page up in the message, from every window |
 | B | page up in the message (in the message window) |
 | : | a vim-like command in the message window (see below) |
-| H | toggle full headers |
+| H | the raw message over the whole screen: all headers and the body exactly as sent (still encoded); **E** opens it in your editor (`$VISUAL`/`$EDITOR`, read only), Esc or H closes it |
 | W | wrap long lines in the message (at the window, at most 76 columns) or not (scroll sideways); also turns H and X off |
 | X | toggle hex dump of the raw message |
 | S | save the message as a text file (see below) |
@@ -563,7 +640,7 @@ columns; 15 from an older mcm counts as 0).
 | ↑ / ↓ | in the message window: to the previous / next link or attachment on the screen (underlined; the chosen one between `>` and `<`), else scroll a line; Enter opens the link or asks Open / Save for the attachment, Esc leaves it; a mouse click on one does the same |
 | L | filter the email list (see *Filter*) |
 | → | from the email list: to the message window |
-| F5 | refresh folder (also polled every 60 s); new mail shows `18:35  New mail: 3 new messages in INBOX` highlighted in the status line until you press a key |
+| F5 | refresh folder (also checked every 60 s by default, see `check_mail`); new mail shows `18:35  New mail: 3 new messages in INBOX` highlighted in the status line until you press a key |
 | F1, F10 | the menu: every command in one window (see *Menu* below) |
 | ? | the key list (help) |
 | Q | quit |
@@ -578,9 +655,9 @@ columns; 15 from an older mcm counts as 0).
 The bottom border of the list and the message window shows their paging keys.
 The list's bottom border starts with **L** (the filter, inverted while it is
 on), **O** (the selected messages, inverted while there are any) and, while
-the last copy or move can be undone, **U**. An email with an attachment has **@** after its N/A flag in the list. The message window's bottom border starts with **H W X S P T K**: all headers,
-wrapped lines, hex dump, save, print, plain text, links and attachments; H, W, X and T are inverted while their mode
-is on, K while the open email has links or attachments, and a click on a letter works like the key. Pressing W also turns H and
+the last copy or move can be undone, **U**. An email with an attachment has **@** after its N/A flag in the list. The message window's bottom border starts with **H W X S P T K**: raw message,
+wrapped lines, hex dump, save, print, plain text, links and attachments; W, X and T are inverted while their mode
+is on, K while the open email has links or attachments, and a click on a letter works like the key. Pressing W also turns
 X off, back to the message text. With W on (the default, kept in `mcm.conf` as
 `message_wrap`) long lines are wrapped at the window's width, at most 76
 columns. With W off lines are shown whole: ← and → move the text sideways and
@@ -622,8 +699,7 @@ they are underlined, ↑/↓ stop at them too, and the status line shows
 as T does. With the mouse, a **click** on a link opens it, and a click on an
 attachment asks Open or Save.
 
-**S** saves the open message as a text file, as it is shown (with all headers
-when H is on), in `~/Downloads`, or in your home folder when there is no
+**S** saves the open message as a text file, as it is shown, in `~/Downloads`, or in your home folder when there is no
 `Downloads` (on Windows `%USERPROFILE%\Downloads`). The name is
 `mcm--SENDER--YYYY-MM-DD--SUBJECT.txt`: the sender's address, the date from
 the message's `Date` header and its subject, e.g.
@@ -974,6 +1050,11 @@ are.
 The wrap width is a setting: **C** (Config) → *Wrap width for new mail*, or
 `wrap_width = 72` in `mcm.conf` (20–998).
 
+How often mcm checks the open folder for new mail while you are not typing is
+a setting too: **C** (Config) → *Check for new mail*, or `check_mail = 60` in
+`mcm.conf`, in seconds (10–86400, default 60; 0 checks only when you press
+**F5**).
+
 Messages are sent as `text/plain; format=flowed` (RFC 3676). A wrapped line
 keeps its space at the end; that marks a *soft* break, so mail programs that
 support format=flowed join the lines into one paragraph again and fit it to
@@ -1032,7 +1113,7 @@ window on the line in question:
 
 ### The message that goes out
 
-- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.995 (Mail Commander)`
+- `Date`, `Message-ID` (random, at the From domain) and `User-Agent: mcm/0.996 (Mail Commander)`
   are added; Bcc is left out of the transmitted header but kept in the Sent copy.
 - Headers are folded at 78 characters, never over 998 (RFC 5322 2.1.1).
 - Non-ASCII names and subjects become RFC 2047 encoded-words (`=?UTF-8?B?...?=`).
@@ -1052,6 +1133,11 @@ charset), and HTML mail has codes such as `&#146;`; these become the
 characters they stand for (`€`, `é`, `’`), and control characters other than
 tab are left out. Without that, the check before sending would refuse the
 message.
+
+Showing a message works the same way: text (or a header) that says it is
+UTF-8, names no charset or one mcm does not know, but has bytes that are not
+UTF-8, is read as Windows-1252, so `café` from an old program shows as
+`café`, not `caf�`.
 
 ### Sending (SMTP)
 
@@ -1180,11 +1266,22 @@ HTML is shown as text:
   the other character references become the characters;
 - at most one empty line in a row, none at the start.
 
-Markdown (`text/markdown`) is shown as the text it is, without the characters
-that only mark style: `**bold**`, `*italic*` and `` `code` `` lose their
-markers, `# Heading` is underlined, links become `text [1]` with the list at
-the end, and code blocks are kept as written (indented). Lists and quotes stay
-as they are.
+Markdown (`text/markdown`) is shown with its layout, without the characters
+that only mark it: `**bold**` is bold (in Konsole turn on *Draw intense colors
+in bold font* in the profile's Appearance), `*italic*` italic (underlined
+where the terminal has no italics), `~~struck~~` struck through and `` `code`
+`` on the header background. `# Headings` are bold in the hotkey color: the
+first two levels underlined with `=` and `-`, level 3 after `-->`, levels 4-6
+after `->`. Links become `text [1]` with the list at the end, and code blocks
+are kept as written (indented). Lists and quotes stay as they are. Saving,
+printing and replying use the text without the styles.
+
+Plain text that is written in Markdown is shown the same way. mcm takes a
+plain-text message for Markdown when it uses at least two kinds of markup:
+`# headings` (two of them count as two), `**bold**`, `*italic*`,
+`~~struck~~`, `` `code` ``, `[text](link)` or a ```` ``` ```` code block. Quoted lines
+(`> `) do not count, so a single `*word*` or `#hashtag` in ordinary mail
+leaves it as it is. **T** shows the text exactly as written.
 
 Characters that show nothing are left out of every message: the zero-width
 space and non-joiner, the combining grapheme joiner, the soft hyphen and the
@@ -1250,7 +1347,7 @@ the title is bright white on a darker selection bar color (60% of
 cyan).
 
 `HEADERBG` and `HEADERTXT` color the header lines (From, To, Date, Subject,
-or all headers with H) at the top of the message window. Without them the
+at the top of the message window. Without them the
 headers use `TEXT` on a lighter background (each color component doubled
 plus 32, so darkblue becomes #2020a0 and black #202020); where that would
 look the same as the rest (an 8-color terminal, or `BACKGROUND = default`)
@@ -1556,7 +1653,7 @@ How it is done:
 | `src/editor.c` | the vim-like message editor |
 | `help/*.txt` | the help texts (compiled in as `src/helptext.h`) |
 | `src/msgview.c` | open message: loads text parts block by block, hex window |
-| `src/mime.c` | RFC 2047 headers, multipart, base64/quoted-printable, charsets (iconv), format=flowed unwrapping |
+| `src/mime.c` | RFC 2047 headers, multipart, base64/quoted-printable, charsets (iconv), format=flowed unwrapping; the text pipeline both ways of showing a message use (`mime_text_part`) |
 | `src/textconv.c` | HTML and Markdown to text: links list, lists, quotes, tables, headings |
 | `src/ui.c`   | ncurses primitives: boxes, menu bar with clock, dialogs, input fields |
 | `src/theme.c`| `.theme` parser, user theme file, color pairs |
@@ -1566,6 +1663,7 @@ How it is done:
 | `win/mcm.rc`, `win/mcm.manifest` | Windows: UTF-8 file names and long paths |
 | `dos/bench.c`, `dos/vectors.h` | MS-DOS TLS benchmark (BearSSL), with known-answer tests |
 | `dos/bearssl-0.6-16bit.patch` | makes BearSSL 0.6 build with 16-bit compilers |
+| `tests/` | `make test`: `check.h` (the checks), `main.c`, one `t_*.c` per part, `t_fuzz.c` |
 
 ## Roadmap
 

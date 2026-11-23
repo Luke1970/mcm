@@ -3,6 +3,8 @@
 /emsg
 src/*.o
 src/helptext.h
+tests/run
+dist/
 win/obj/
 win/mcm/
 win/mcm.zip

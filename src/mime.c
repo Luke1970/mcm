@@ -96,20 +96,18 @@ char *conv_to_utf8(const char *charset, const char *in, size_t len, size_t *outl
 	cs[n] = '\0';
 	str_trim(cs);
 
+	/* UTF-8 (or what claims to be), and no charset: bytes that are not
+	 * UTF-8 are read as Windows-1252, the usual mistake */
 	if (!*cs || !strcasecmp(cs, "utf-8") || !strcasecmp(cs, "utf8") ||
-	    !strcasecmp(cs, "us-ascii") || !strcasecmp(cs, "ascii")) {
-		if (outlen) *outlen = len;
-		return xstrndup(in, len);
-	}
+	    !strcasecmp(cs, "us-ascii") || !strcasecmp(cs, "ascii"))
+		return utf8_repair(in, len, outlen);
 	/* Latin-1 is very often mislabelled Windows-1252, which is a superset. */
 	if (!strcasecmp(cs, "iso-8859-1") || !strcasecmp(cs, "latin1"))
 		strcpy(cs, "WINDOWS-1252");
 
 	iconv_t cd = iconv_open("UTF-8", cs);
-	if (cd == (iconv_t)-1) {
-		if (outlen) *outlen = len;
-		return xstrndup(in, len);
-	}
+	if (cd == (iconv_t)-1)                       /* a charset iconv does not know */
+		return utf8_repair(in, len, outlen);
 
 	buf_t out = {0};
 	char tmp[4096];
@@ -147,9 +145,22 @@ char *conv_to_utf8(const char *charset, const char *in, size_t len, size_t *outl
 /* ------------------------------------------------------------------ */
 /* RFC 2047                                                            */
 
+/* Convert the bytes of the encoded words collected in raw (charset cs). */
+static void words_flush(buf_t *out, buf_t *raw, char *cs)
+{
+	if (!*cs) return;
+	size_t ol;
+	char *u = conv_to_utf8(cs, raw->d ? raw->d : "", raw->len, &ol);
+	buf_add(out, u, ol);
+	free(u);
+	raw->len = 0;
+	*cs = '\0';
+}
+
 char *mime_decode_words(const char *s)
 {
-	buf_t out = {0};
+	buf_t out = {0}, raw = {0};
+	char pcs[64] = "";                     /* charset of the words in raw */
 	const char *p = s;
 	int pending_ws = 0, last_word = 0;
 
@@ -164,17 +175,17 @@ char *mime_decode_words(const char *s)
 				if (endw && (enc == 'B' || enc == 'Q') && q1 - cs < 60) {
 					char csn[64];
 					snprintf(csn, sizeof csn, "%.*s", (int)(q1 - cs), cs);
-					buf_t raw = {0};
+					/* Adjacent words in the same charset are converted
+					 * together: some mailers split a character over two. */
+					if (!last_word || strcasecmp(csn, pcs)) {
+						words_flush(&out, &raw, pcs);
+						/* whitespace between two encoded words is dropped */
+						if (pending_ws && !last_word && out.len) buf_addc(&out, ' ');
+						snprintf(pcs, sizeof pcs, "%s", *csn ? csn : "us-ascii");
+					}
+					pending_ws = 0;
 					if (enc == 'B') b64_decode(txt, (size_t)(endw - txt), &raw);
 					else qp_decode(txt, (size_t)(endw - txt), &raw, 1);
-					size_t ol;
-					char *u = conv_to_utf8(csn, raw.d ? raw.d : "", raw.len, &ol);
-					/* whitespace between two encoded words is dropped */
-					if (pending_ws && !last_word && out.len) buf_addc(&out, ' ');
-					pending_ws = 0;
-					buf_add(&out, u, ol);
-					free(u);
-					buf_free(&raw);
 					p = endw + 2;
 					last_word = 1;
 					continue;
@@ -186,12 +197,19 @@ char *mime_decode_words(const char *s)
 			pending_ws = 1;
 			continue;
 		}
+		words_flush(&out, &raw, pcs);
 		if (pending_ws && out.len) buf_addc(&out, ' ');
 		pending_ws = 0;
 		buf_addc(&out, *p++);
 		last_word = 0;
 	}
-	return buf_steal(&out);
+	words_flush(&out, &raw, pcs);
+	buf_free(&raw);
+	/* 8-bit text outside encoded words (not allowed, but sent): read as
+	 * UTF-8, else Windows-1252 */
+	char *r = utf8_repair(out.d ? out.d : "", out.len, NULL);
+	buf_free(&out);
+	return r;
 }
 
 /* ------------------------------------------------------------------ */
@@ -637,19 +655,32 @@ static int alt_pick(span_t *parts, int n)
 		else if (!strncmp(t, "multipart/", 10) && multi < 0) multi = i;
 		free(t);
 	}
+	int poor = 0;
 	if (pick >= 0 && html >= 0 && !prefer_plain) {
 		const char *ph, *pb;
 		size_t phl, pbl, blank = 0;
 		split_entity(parts[pick].p, parts[pick].len, &ph, &phl, &pb, &pbl);
 		for (size_t k = 0; k < pbl; k++)
 			if (pb[k] == ' ' || pb[k] == '\t' || pb[k] == '\r' || pb[k] == '\n') blank++;
-		if (pbl - blank <= 8) pick = html;
-		/* a "plain text" that is an HTML page or full of CSS (a
-		 * newsletter's mistake): the real HTML version */
-		else if (plain_is_html(parts[pick])) pick = html;
+		/* (nearly) empty, or a "plain text" that is an HTML page or full
+		 * of CSS (a newsletter's mistake): the real HTML version */
+		poor = pbl - blank <= MIME_EMPTY_PART || plain_is_html(parts[pick]);
 	}
-	if (pick < 0) pick = html >= 0 ? html : multi >= 0 ? multi : 0;
-	return pick;
+	return mime_alt_choose(pick, html, multi, poor, prefer_plain);
+}
+
+int mime_alt_choose(int plain, int html, int multi, int plain_poor, int as_sent)
+{
+	if (plain >= 0 && html >= 0 && plain_poor && !as_sent) return html;
+	if (plain >= 0) return plain;
+	return html >= 0 ? html : multi >= 0 ? multi : 0;
+}
+
+void mime_att_line(buf_t *out, const char *name, const char *type, size_t size, const char *cte)
+{
+	char hs[32];
+	mime_human_size(hs, sizeof hs, cte && !strcasecmp(cte, "base64") ? size * 3 / 4 : size);
+	buf_printf(out, "[Attachment: %s  (%s, %s)]\n", name && *name ? name : "(unnamed)", type, hs);
 }
 
 static void render_summary(buf_t *out, const char *p, size_t len)
@@ -743,50 +774,26 @@ static void render_part(buf_t *out, const char *p, size_t len, int depth)
 		render_part(out, b, bl, depth + 1);
 	} else if (!attachment && (!strcmp(type, "text/plain") || !strcmp(type, "text/html") ||
 	                           mime_is_markdown(type) || !strncmp(type, "multipart/", 10))) {
-		buf_t dec = {0};
-		if (cte && !strcmp(cte, "base64")) b64_decode(b, bl, &dec);
-		else if (cte && !strcmp(cte, "quoted-printable")) qp_decode(b, bl, &dec, 0);
-		else buf_add(&dec, b, bl);
-
 		char *cs = param_get(ct, "charset");
-		size_t ul;
-		char *u = conv_to_utf8(cs, dec.d ? dec.d : "", dec.len, &ul);
 		char *fmt = param_get(ct, "format");
-		buf_t t = {0};
-		int plain = 0;
-		if (!strcmp(type, "text/html")) html_to_text(u, ul, &t);
-		else if (mime_is_markdown(type)) md_to_text(u, ul, &t);
-		else if (fmt && !strcasecmp(fmt, "flowed")) {
-			char *ds = param_get(ct, "delsp");
-			size_t fl;
-			char *f = mime_unflow(u, ul, ds && !strcasecmp(ds, "yes"), &fl);
-			buf_add(&t, f, fl);
-			free(f);
-			free(ds);
-			plain = 1;
-		} else {
-			buf_add(&t, u, ul);
-			plain = 1;
-		}
-		free(fmt);
-		/* without the characters that show nothing (newsletters put rows
-		 * of them after the preview text); in plain text also written as
-		 * &#8204; and the like, copied there from the HTML */
-		if (plain && prefer_plain) buf_add(out, t.d ? t.d : "", t.len);   /* T: as sent */
-		else strip_invisible(t.d ? t.d : "", t.len, plain, out);
-		buf_free(&t);
+		char *ds = param_get(ct, "delsp");
+		mime_textopt o = {
+			.kind = !strcmp(type, "text/html") ? MIME_HTML : mime_is_markdown(type) ? MIME_MARKDOWN : MIME_PLAIN,
+			.cte = cte, .charset = cs,
+			.flowed = fmt && !strcasecmp(fmt, "flowed"), .delsp = ds && !strcasecmp(ds, "yes"),
+			.as_sent = prefer_plain,
+		};
+		size_t tl;
+		char *t = mime_text_part(b, bl, &o, &tl);
+		buf_add(out, t, tl);
+		free(t);
 		if (out->len && out->d[out->len - 1] != '\n') buf_addc(out, '\n');
-		free(u);
 		free(cs);
-		buf_free(&dec);
+		free(fmt);
+		free(ds);
 	} else {
 		char *fn = part_name(disp, ct);
-		char *fnd = fn ? xstrdup(fn) : xstrdup("(unnamed)");
-		size_t sz = (cte && !strcmp(cte, "base64")) ? bl * 3 / 4 : bl;
-		char hs[32];
-		mime_human_size(hs, sizeof hs, sz);
-		buf_printf(out, "[Attachment: %s  (%s, %s)]\n", fnd, type, hs);
-		free(fnd);
+		mime_att_line(out, fn, type, bl, cte);
 		free(fn);
 	}
 
@@ -849,7 +856,6 @@ char *mime_decode_cte(const char *in, size_t len, const char *cte, size_t *outle
 		b64_decode(in, len, &b);
 	} else if (cte && !strcasecmp(cte, "quoted-printable")) {
 		qp_decode(in, len, &b, 0);
-		if (b.len && (!len || in[len - 1] != '\n')) b.len--;   /* the newline qp_decode adds */
 	} else {
 		buf_add(&b, in, len);
 	}
@@ -980,30 +986,57 @@ int mime_is_markdown(const char *type)
 	return !strcasecmp(type, "text/markdown") || !strcasecmp(type, "text/x-markdown");
 }
 
-char *mime_decode_text(const char *data, size_t len, int kind, const char *cte,
+char *mime_decode_text(const char *data, size_t len, const char *cte,
                        const char *charset, size_t *outlen)
 {
 	buf_t dec = {0};
 	if (cte && !strcasecmp(cte, "base64")) b64_decode(data, len, &dec);
 	else if (cte && !strcasecmp(cte, "quoted-printable")) qp_decode(data, len, &dec, 0);
 	else buf_add(&dec, data, len);
-
-	size_t ul;
-	char *u = conv_to_utf8(charset, dec.d ? dec.d : "", dec.len, &ul);
+	char *u = conv_to_utf8(charset, dec.d ? dec.d : "", dec.len, outlen);
 	buf_free(&dec);
-	if (kind == MIME_PLAIN) {               /* stripped after unflowing (msgview.c) */
-		if (outlen) *outlen = ul;
-		return u;
+	return u;
+}
+
+char *mime_text_part(const char *data, size_t len, const mime_textopt *o, size_t *outlen)
+{
+	size_t n;
+	char *t = mime_decode_text(data, len, o->cte, o->charset, &n);
+	buf_t r = {0};
+
+	if (o->kind != MIME_PLAIN) {
+		if (o->kind == MIME_HTML) html_to_text(t, n, &r);
+		else md_to_text(t, n, &r);
+		free(t);
+		n = r.len;
+		t = r.d ? buf_steal(&r) : xstrdup("");
+		/* without the characters that show nothing (newsletters put rows
+		 * of them after the preview text) */
+		strip_invisible(t, n, 0, &r);
+	} else {
+		if (o->hook) o->hook(o->ctx, &t, &n);
+		if (o->flowed) {                                  /* RFC 3676: join soft breaks */
+			char *u = mime_unflow(t, n, o->delsp, &n);
+			free(t);
+			t = u;
+		}
+		if (o->as_sent) {                                 /* T: as sent */
+			if (outlen) *outlen = n;
+			return t;
+		}
+		if (md_detect(t, n)) {                            /* Markdown as plain text */
+			md_to_text(t, n, &r);
+			free(t);
+			n = r.len;
+			t = r.d ? buf_steal(&r) : xstrdup("");
+		}
+		/* in plain text also the ones written as &#8204; and the like,
+		 * copied there from the HTML */
+		strip_invisible(t, n, 1, &r);
 	}
-	buf_t t = {0}, out = {0};
-	if (kind == MIME_HTML) html_to_text(u, ul, &t);
-	else md_to_text(u, ul, &t);
-	free(u);
-	/* as render_part: without the characters that show nothing */
-	strip_invisible(t.d ? t.d : "", t.len, 0, &out);
-	buf_free(&t);
-	if (outlen) *outlen = out.len;
-	return out.d ? buf_steal(&out) : xstrdup("");
+	free(t);
+	if (outlen) *outlen = r.len;
+	return r.d ? buf_steal(&r) : xstrdup("");
 }
 
 /* ------------------------------------------------------------------ */

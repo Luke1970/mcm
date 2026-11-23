@@ -288,6 +288,28 @@ static void add_windows_roots(SSL_CTX *ctx)
 }
 #endif
 
+#ifndef _WIN32
+/* The trusted certificates where the systems keep them. OpenSSL's default
+ * paths are those of the system it was built on; the static Linux build
+ * (make static) must also find them on other distributions. Not when
+ * SSL_CERT_FILE or SSL_CERT_DIR says where they are. */
+static void add_system_roots(SSL_CTX *ctx)
+{
+	if (getenv("SSL_CERT_FILE") || getenv("SSL_CERT_DIR")) return;
+	static const char *const files[] = {
+		"/etc/ssl/certs/ca-certificates.crt",     /* Debian, Ubuntu, Arch, Alpine, Gentoo, Void */
+		"/etc/pki/tls/certs/ca-bundle.crt",       /* Fedora, RHEL, CentOS, Rocky, Alma */
+		"/etc/ssl/ca-bundle.pem",                 /* openSUSE, SLES */
+		"/etc/pki/ca-trust/extracted/pem/tls-ca-bundle.pem",
+		"/etc/ssl/cert.pem",                      /* Alpine, Arch, the BSDs */
+		"/usr/local/share/certs/ca-root-nss.crt", /* FreeBSD */
+	};
+	for (size_t i = 0; i < sizeof files / sizeof *files; i++)
+		if (access(files[i], R_OK) == 0 && SSL_CTX_load_verify_locations(ctx, files[i], NULL) == 1) break;
+	ERR_clear_error();   /* duplicates of the default ones are not a problem */
+}
+#endif
+
 /* SNI + certificate name check. IP literals are matched against IP SANs. */
 static int set_peer_name(SSL *ssl, const char *host)
 {
@@ -429,6 +451,8 @@ int net_tls(net_t *n, net_trust *t, int interactive)
 	SSL_CTX_set_default_verify_paths(n->ctx);
 #ifdef _WIN32
 	add_windows_roots(n->ctx);
+#else
+	add_system_roots(n->ctx);
 #endif
 	SSL_CTX_set_verify(n->ctx, SSL_VERIFY_PEER, verify_cb);
 

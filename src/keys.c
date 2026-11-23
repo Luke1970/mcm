@@ -138,11 +138,8 @@ int handle_key(int ch)
 	case KEY_F(5):
 		refresh_folder(0);
 		return 1;
-	case 'h': case 'H':
-		A.show_headers = !A.show_headers;
-		A.hex = 0;
-		A.vtop = 0;
-		A.text_dirty = 1;
+	case 'h': case 'H':                        /* the raw message, full screen */
+		handle_key_raw();
 		return 1;
 	case 'x': case 'X':
 		A.hex = !A.hex;
